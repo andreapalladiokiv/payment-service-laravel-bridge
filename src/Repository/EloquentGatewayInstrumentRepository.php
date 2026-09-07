@@ -23,8 +23,12 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 /**
  * @implements PaymentInstrumentVisitor<UuidValueObject|null>
  */
-final class EloquentGatewayInstrumentRepository implements GatewayInstrumentRepository, PaymentInstrumentVisitor
+final readonly class EloquentGatewayInstrumentRepository implements GatewayInstrumentRepository, PaymentInstrumentVisitor
 {
+    public function __construct(private string $modelClass = GatewayReference::class)
+    {
+    }
+
     #[Override]
     public function find(GatewayId $gatewayId, PaymentInstrument $instrument): ?string
     {
@@ -34,7 +38,7 @@ final class EloquentGatewayInstrumentRepository implements GatewayInstrumentRepo
             return null;
         }
 
-        return GatewayReference::query()
+        return $this->modelClass::query()
             ->where('gateway_id', $gatewayId->toString())
             ->where('referenceable_type', $instrument::type())
             ->where('referenceable_id', $id)
@@ -53,13 +57,10 @@ final class EloquentGatewayInstrumentRepository implements GatewayInstrumentRepo
         // reached the upsert and surfaced as the driver's NOT NULL violation, which names a
         // column rather than the caller's mistake.
         if ($id === null) {
-            throw new RuntimeException(sprintf(
-                'A %s carries no identity to store a gateway reference against; tokenise it first.',
-                $instrument::type(),
-            ));
+            throw new RuntimeException("A {$instrument::type()} carries no identity to store a gateway reference against; tokenise it first.");
         }
 
-        GatewayReference::query()->upsert(
+        $this->modelClass::query()->upsert(
             [
                 'gateway_id' => $gatewayId->toString(),
                 'referenceable_type' => $instrument::type(),
@@ -84,10 +85,7 @@ final class EloquentGatewayInstrumentRepository implements GatewayInstrumentRepo
         // reached the upsert and surfaced as the driver's NOT NULL violation, which names a
         // column rather than the caller's mistake.
         if ($id === null) {
-            throw new RuntimeException(sprintf(
-                'A %s carries no identity to store a gateway reference against; tokenise it first.',
-                $instrument::type(),
-            ));
+            throw new RuntimeException("A {$instrument::type()} carries no identity to store a gateway reference against; tokenise it first.");
         }
 
         GatewayReference::query()->upsert(

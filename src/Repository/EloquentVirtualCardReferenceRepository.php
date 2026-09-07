@@ -13,11 +13,15 @@ final readonly class EloquentVirtualCardReferenceRepository implements VirtualCa
 {
     private const string MORPH_TYPE = 'virtual_card';
 
+    public function __construct(private string $modelClass = GatewayReference::class)
+    {
+    }
+
     #[Override]
     public function find(GatewayId $gatewayId, string $virtualCardId): ?string
     {
-        return GatewayReference::query()
-            ->where('gateway_id', $gatewayId->toString())
+        return $this->modelClass::query()
+            ->where('gateway_id', $gatewayId)
             ->where('referenceable_type', self::MORPH_TYPE)
             ->where('referenceable_id', $virtualCardId)
             ->value('reference');
@@ -26,8 +30,8 @@ final readonly class EloquentVirtualCardReferenceRepository implements VirtualCa
     #[Override]
     public function findVirtualCardId(GatewayId $gatewayId, string $reference): ?string
     {
-        return GatewayReference::query()
-            ->where('gateway_id', $gatewayId->toString())
+        return $this->modelClass::query()
+            ->where('gateway_id', $gatewayId)
             ->where('referenceable_type', self::MORPH_TYPE)
             ->where('reference', $reference)
             ->value('referenceable_id');
@@ -36,10 +40,10 @@ final readonly class EloquentVirtualCardReferenceRepository implements VirtualCa
     #[Override]
     public function saveReference(GatewayId $gatewayId, string $virtualCardId, string $reference): void
     {
-        GatewayReference::query()
+        $this->modelClass::query()
             ->upsert(
                 [
-                    'gateway_id' => $gatewayId->toString(),
+                    'gateway_id' => $gatewayId,
                     'referenceable_type' => self::MORPH_TYPE,
                     'referenceable_id' => $virtualCardId,
                     'reference' => $reference,

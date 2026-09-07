@@ -16,11 +16,15 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  * Semantics: one row per (gateway, aggregate) — writes overwrite on transition
  * (e.g. PaymentIntent auth-ref → charge-ref on capture).
  */
-final class EloquentGatewayTransactionRepository implements GatewayTransactionRepository
+final readonly class EloquentGatewayTransactionRepository implements GatewayTransactionRepository
 {
     public const string TYPE_PAYMENT_INTENT = 'payment_intent';
 
     public const string TYPE_REFUND = 'refund';
+
+    public function __construct(private string $modelClass = GatewayReference::class)
+    {
+    }
 
     #[Override]
     public function findForPaymentIntent(string $paymentIntentId): ?string
@@ -54,7 +58,7 @@ final class EloquentGatewayTransactionRepository implements GatewayTransactionRe
 
     private function find(string $referenceableType, string $referenceableId): ?string
     {
-        return GatewayReference::query()
+        return $this->modelClass::query()
             ->where('referenceable_type', $referenceableType)
             ->where('referenceable_id', $referenceableId)
             ->value('reference');
@@ -75,7 +79,7 @@ final class EloquentGatewayTransactionRepository implements GatewayTransactionRe
         // updated rather than pinned.
         $existing = $metadata === [] ? [] : $this->findMetadata($referenceableType, $referenceableId);
 
-        GatewayReference::unguarded(fn () => GatewayReference::query()->updateOrCreate(
+        $this->modelClass::unguarded(fn () => $this->modelClass::query()->updateOrCreate(
             [
                 'gateway_id' => $gatewayId->toString(),
                 'referenceable_type' => $referenceableType,
@@ -84,7 +88,7 @@ final class EloquentGatewayTransactionRepository implements GatewayTransactionRe
             [
                 'reference' => $reference,
                 'failure_reason' => null,
-                ...($metadata === [] ? [] : ['metadata' => json_encode([...$existing, ...$metadata])]),
+                ...($metadata === [] ? [] : ['metadata' => [...$existing, ...$metadata]]),
             ],
         ));
     }
@@ -92,17 +96,11 @@ final class EloquentGatewayTransactionRepository implements GatewayTransactionRe
     /** @return array<string, mixed> */
     private function findMetadata(string $referenceableType, string $referenceableId): array
     {
-        $metadata = GatewayReference::query()
+        $metadata = $this->modelClass::query()
             ->where('referenceable_type', $referenceableType)
             ->where('referenceable_id', $referenceableId)
             ->value('metadata');
 
-        if ($metadata === null || $metadata === '') {
-            return [];
-        }
-
-        $decoded = json_decode((string) $metadata, true);
-
-        return is_array($decoded) ? $decoded : [];
+        return $metadata ?: [];
     }
 }
