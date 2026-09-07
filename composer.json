@@ -41,12 +41,12 @@
         "symfony/serializer": "^7.0 || ^8.0",
         "techork/payment-service-common": "@dev",
         "techork/payment-service-domain": "@dev",
+        "techork/payment-service-firewall": "@dev",
         "techork/payment-service-gateway": "@dev"
     },
     "require-dev": {
         "mockery/mockery": "^1.6",
-        "pestphp/pest": "^4.6",
-        "techork/payment-service-firewall": "@dev"
+        "pestphp/pest": "^4.6"
     },
     "autoload": {
         "psr-4": {
