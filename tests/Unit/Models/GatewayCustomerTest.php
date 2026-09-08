@@ -17,7 +17,7 @@ use Techork\PaymentService\Laravel\Models\GatewayReference;
  * declarations carry consequences that only a database can show.
  *
  * `$guarded = ['*']` is total: it does not filter a payload, it refuses one, which is why
- * {@see \Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository} wraps its
+ * {@see \Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository} wraps its
  * write in `unguarded()`. Pinned from this side because a reader could take the guard for a
  * safety net that quietly drops unexpected keys, remove the `unguarded()` wrapper as
  * redundant, and break customer creation for every provider at once.
@@ -175,25 +175,11 @@ it('belongs to the gateway whose id it holds as a value object', function () {
         ->and($resolved->getGatewayName())->toBe('Nuvei');
 });
 
-it('reaches its instrument references through the pivot, and only its own', function () {
-    // The inverse of GatewayReference::customers(): given a provider-side customer, which
-    // vaulted instruments belong to it. Both custom pivot column names have to be right, and
-    // a wrong one reads as an empty set rather than an error — so the second customer's
-    // reference is here to prove the set is filtered and not simply empty.
-    $gateway = gatewayCustomerGatewayRow();
-    $mine = GatewayCustomer::query()->forceCreate(['gateway_id' => $gateway->getKey(), 'customer_reference' => 'cus_mine']);
-    $theirs = GatewayCustomer::query()->forceCreate(['gateway_id' => $gateway->getKey(), 'customer_reference' => 'cus_theirs']);
-
-    foreach ([[$mine, 'tok_mine'], [$theirs, 'tok_theirs']] as [$customer, $reference]) {
-        $row = GatewayReference::query()->forceCreate([
-            'gateway_id' => $gateway->getKey(),
-            'referenceable_type' => 'token',
-            'referenceable_id' => Uuid::uuid4()->toString(),
-            'reference' => $reference,
-        ]);
-        $row->customers()->attach($customer->getKey());
-    }
-
-    expect($mine->references()->pluck('reference')->all())->toBe(['tok_mine'])
-        ->and($theirs->references()->pluck('reference')->all())->toBe(['tok_theirs']);
-});
+/*
+ * `it('reaches its instrument references through the pivot, and only its own')` lived here and
+ * described a relation that no longer exists. `GatewayCustomer::references()` and its inverse
+ * `GatewayReference::customers()` went with their last reader: the pivot linked a provider-side
+ * customer to an instrument's *reference*, which is exactly why identity was unreachable for a raw
+ * card and reachable through an expiring token. `gateway_reference_customer` is left standing and
+ * unread, as the only surviving record of which cards a provider knew under one customer.
+ */

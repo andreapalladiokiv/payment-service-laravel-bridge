@@ -35,7 +35,6 @@ use Techork\PaymentService\Domain\Subscription\SubscriptionAggregateRepositoryIn
 use Techork\PaymentService\Firewall\Dsl\FactSchema;
 use Techork\PaymentService\Firewall\Dsl\RuleCompiler;
 use Techork\PaymentService\Firewall\Dsl\RuleEvaluator;
-use Techork\PaymentService\Gateway\Contract\CustomerRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
 use Techork\PaymentService\Gateway\Contract\Gateway;
 use Techork\PaymentService\Gateway\Contract\GatewayCredentialRepository;
@@ -60,7 +59,6 @@ use Techork\PaymentService\Laravel\Logger\Sanitizer\CardNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\Sanitizer\EmailSanitizer;
 use Techork\PaymentService\Laravel\Logger\Sanitizer\PhoneNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\SanitizingLogger;
-use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayCredentialRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
@@ -80,7 +78,6 @@ final class GatewayServiceProvider extends PackageServiceProvider
 {
     public $singletons = [
         GatewayCredentialRepository::class => EloquentGatewayCredentialRepository::class,
-        CustomerRepository::class => EloquentCustomerRepository::class,
         GatewayCustomerRepository::class => EloquentGatewayCustomerRepository::class,
         GatewayInstrumentRepository::class => EloquentGatewayInstrumentRepository::class,
         GatewayTransactionRepository::class => EloquentGatewayTransactionRepository::class,
