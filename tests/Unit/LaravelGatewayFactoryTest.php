@@ -320,10 +320,18 @@ it('gives each gateway name its own services entry', function () {
         ->and($productionSide->bakedBaseUrl)->toBe('https://live.probe.test');
 });
 
-it('still holds the customer repository the parent attached after re-initialising', function () {
-    // The parent sets the repository between its initialize() and ours. It is a property
-    // rather than a parameter, so a re-initialise must leave it standing; providers call it
-    // during tokenization and a null there fails only at that point, far from here.
+it('hands the gateway-customer map down to the driver it builds', function () {
+    // The map reaches a driver as part of `GatewayInfrastructure`, once, and this is the only
+    // route: the per-gateway `setCustomerRepository()` it used to arrive through is gone, and so
+    // is the null it left a driver holding until something called it. What this pins is that the
+    // factory passes the same instance it was constructed with — a driver given a different one,
+    // or none, resolves every customer to null and every payment reaches the provider anonymous,
+    // which fails far from here.
+    //
+    // The comment this replaced described the parent setting the repository between two
+    // `initialize()` calls, and Omnipay's parameter bag went with `bf8ebfd`. There is one
+    // configuration step now, so there is no window in which a driver and its configuration
+    // disagree.
     $repository = new EloquentGatewayCustomerRepository;
     $factory = new LaravelGatewayFactory(
         $repository,
