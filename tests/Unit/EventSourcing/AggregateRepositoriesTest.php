@@ -14,6 +14,8 @@ use Money\Currency;
 use Money\Money;
 use Techork\PaymentService\Common\ValueObject\BillingAddress;
 use Techork\PaymentService\Common\ValueObject\Country;
+use Techork\PaymentService\Common\ValueObject\CustomerIdentity;
+use Techork\PaymentService\Common\ValueObject\Email;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
 use Techork\PaymentService\Common\ValueObject\MerchantDescriptor;
 use Techork\PaymentService\Common\ValueObject\PaymentMethodId;
@@ -22,6 +24,10 @@ use Techork\PaymentService\Domain\Checkout\CheckoutAggregate;
 use Techork\PaymentService\Domain\Checkout\Event\CheckoutCancelled;
 use Techork\PaymentService\Domain\Checkout\Event\CheckoutCreated;
 use Techork\PaymentService\Domain\Checkout\ValueObject\CheckoutId;
+use Techork\PaymentService\Domain\Customer\CustomerAggregate;
+use Techork\PaymentService\Domain\Customer\CustomerStatus;
+use Techork\PaymentService\Domain\Customer\Event\CustomerRegistered;
+use Techork\PaymentService\Domain\Customer\ValueObject\CustomerId;
 use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Event\PaymentIntentImported;
 use Techork\PaymentService\Domain\PaymentIntent\PaymentIntentAggregate;
@@ -36,6 +42,7 @@ use Techork\PaymentService\Domain\Subscription\ValueObject\SubscriptionId;
 use Techork\PaymentService\Domain\Subscription\ValueObject\SubscriptionPlan;
 use Techork\PaymentService\Laravel\EventSourcing\Decorators\GatewayIdMessageDecorator;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\CheckoutAggregateRepository;
+use Techork\PaymentService\Laravel\EventSourcing\Repositories\CustomerAggregateRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateMessageRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateSnapshotRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\PaymentIntentAggregateRepository;
@@ -43,12 +50,12 @@ use Techork\PaymentService\Laravel\EventSourcing\Repositories\SubscriptionAggreg
 use Techork\PaymentService\Tests\Support\EventStreamDatabase;
 
 /**
- * The three aggregate repositories, over the real message and snapshot repositories.
+ * The four aggregate repositories, over the real message and snapshot repositories.
  *
- * Each of them is the same handful of lines three times: an `EventSourcedAggregateRootRepository`
+ * Each of them is the same handful of lines four times: an `EventSourcedAggregateRootRepository`
  * for the write path, plus a `ConstructingAggregateRootRepositoryWithSnapshotting` built beside
  * it for the read path. Wiring duplicated per aggregate is wiring that can be wrong for one
- * aggregate and right for the others, so every assertion below is made for all three rather
+ * aggregate and right for the others, so every assertion below is made for all four rather
  * than for whichever one was convenient — a decorator handed to the parent but not to the
  * inner repository, or a snapshot repository connected for `PaymentIntent` and forgotten for
  * `Subscription`, is invisible until it is a stream that will not replay.
@@ -70,6 +77,15 @@ function aggregateRepoWiring(): array
         new IlluminateMessageRepository($connection, 'stored_events', EventStreamDatabase::messageSerializer()),
         new IlluminateSnapshotRepository($connection),
     ];
+}
+
+function aggregateRepoCustomerRegistered(): CustomerRegistered
+{
+    return new CustomerRegistered(
+        // An email, so the payload that crosses the serializer carries a `#[Pii]` field: this
+        // stream is the one whose whole payload is a person.
+        new CustomerIdentity('Ada', 'Lovelace', new Email('ada@example.test')),
+    );
 }
 
 function aggregateRepoCheckoutCreated(): CheckoutCreated
@@ -218,6 +234,47 @@ it('hands back a Subscription aggregate carrying its plan', function () {
         ->and($subscription->amount())->toEqual(new Money(2999, new Currency('USD')));
 });
 
+/**
+ * The Customer stream is the one whose entire payload is a person, so the assertion that matters
+ * is not only that it replays — it is that the email did not land in the table in the clear.
+ *
+ * The `#[Pii]` markings on {@see CustomerIdentity} do their work through the serializer, which
+ * normalizes the *event object* rather than calling `toPayload()` — so nothing had to register
+ * this aggregate anywhere for shredding to apply, and equally nothing would have said so if the
+ * chain had missed it. `PiiAwareObjectNormalizerTest` proves the mechanism on fixtures; this
+ * proves it on the payload that actually carries a name.
+ */
+it('hands back a Customer aggregate whose identity never touched the table in the clear', function () {
+    [$connection, $messages, $snapshots] = aggregateRepoWiring();
+    $repository = new CustomerAggregateRepository($messages, $snapshots);
+    $id = CustomerId::generate();
+
+    $repository->persistEvents($id, 1, aggregateRepoCustomerRegistered());
+
+    $customer = $repository->retrieve($id);
+    $stored = (string) $connection->table('stored_events')->value('payload');
+    /** @var array{payload: array{identity: array<string, ?string>}} $decoded */
+    $decoded = json_decode($stored, true, flags: JSON_THROW_ON_ERROR);
+    $written = $decoded['payload']['identity'];
+
+    expect($customer)->toBeInstanceOf(CustomerAggregate::class)
+        ->and($customer->aggregateRootId()->toString())->toBe($id->toString())
+        ->and($customer->aggregateRootVersion())->toBe(1)
+        ->and($customer->identity()->firstName)->toBe('Ada')
+        ->and((string) $customer->identity()->email)->toBe('ada@example.test')
+        ->and($customer->status())->toBe(CustomerStatus::Active);
+
+    // Round-tripped above, and yet none of it is in the table: each field is the sha256 the
+    // store hands back plaintext for, and erasure drops that row. `phone` stays null rather
+    // than becoming the hash of an empty string — an absent field is not a shredded one.
+    expect($stored)->not->toContain('ada@example.test')
+        ->and($stored)->not->toContain('Lovelace')
+        ->and($written['firstName'])->toMatch('/^[0-9a-f]{64}$/')
+        ->and($written['lastName'])->toMatch('/^[0-9a-f]{64}$/')
+        ->and($written['email'])->toMatch('/^[0-9a-f]{64}$/')
+        ->and($written['phone'])->toBeNull();
+});
+
 it('answers an id with no history with a fresh aggregate at version zero', function (string $repositoryClass, callable $newId, string $aggregateClass) {
     [, $messages, $snapshots] = aggregateRepoWiring();
     /** @var object $repository */
@@ -234,6 +291,7 @@ it('answers an id with no history with a fresh aggregate at version zero', funct
     'checkout' => [CheckoutAggregateRepository::class, fn () => CheckoutId::generate(), CheckoutAggregate::class],
     'payment intent' => [PaymentIntentAggregateRepository::class, fn () => PaymentIntentId::generate(), PaymentIntentAggregate::class],
     'subscription' => [SubscriptionAggregateRepository::class, fn () => SubscriptionId::generate(), SubscriptionAggregate::class],
+    'customer' => [CustomerAggregateRepository::class, fn () => CustomerId::generate(), CustomerAggregate::class],
 ]);
 
 it('rebuilds from the snapshot and replays only the events after it', function () {
@@ -334,6 +392,7 @@ it('applies the decorator it was given to the messages it writes', function (str
     'checkout' => [CheckoutAggregateRepository::class, fn () => CheckoutId::generate(), fn () => aggregateRepoCheckoutCreated()],
     'payment intent' => [PaymentIntentAggregateRepository::class, fn () => PaymentIntentId::generate(), fn () => aggregateRepoImportedIntent()],
     'subscription' => [SubscriptionAggregateRepository::class, fn () => SubscriptionId::generate(), fn () => aggregateRepoSubscriptionCreated()],
+    'customer' => [CustomerAggregateRepository::class, fn () => CustomerId::generate(), fn () => aggregateRepoCustomerRegistered()],
 ]);
 
 it('records the aggregate type each repository was built for', function (string $repositoryClass, callable $newId, callable $newEvent, string $expectedType) {
@@ -348,12 +407,13 @@ it('records the aggregate type each repository was built for', function (string 
 
     // The aggregate-root type header is how a consumer tells a checkout's stream from a
     // subscription's in a table that holds both, and it is derived from the class name each
-    // repository was constructed with — the one thing that differs between these three files.
+    // repository was constructed with — the one thing that differs between these four files.
     expect($stored[0]->aggregateRootType())->toBe($expectedType);
 })->with([
     'checkout' => [CheckoutAggregateRepository::class, fn () => CheckoutId::generate(), fn () => aggregateRepoCheckoutCreated(), 'techork.payment_service.domain.checkout.checkout_aggregate'],
     'payment intent' => [PaymentIntentAggregateRepository::class, fn () => PaymentIntentId::generate(), fn () => aggregateRepoImportedIntent(), 'techork.payment_service.domain.payment_intent.payment_intent_aggregate'],
     'subscription' => [SubscriptionAggregateRepository::class, fn () => SubscriptionId::generate(), fn () => aggregateRepoSubscriptionCreated(), 'techork.payment_service.domain.subscription.subscription_aggregate'],
+    'customer' => [CustomerAggregateRepository::class, fn () => CustomerId::generate(), fn () => aggregateRepoCustomerRegistered(), 'techork.payment_service.domain.customer.customer_aggregate'],
 ]);
 
 it('keeps the streams of two aggregates in the same table apart', function () {
