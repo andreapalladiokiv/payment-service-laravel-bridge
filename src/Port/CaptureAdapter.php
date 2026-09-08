@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
+use Techork\PaymentService\Common\Contract\CustomerIdentifier;
 use RuntimeException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CaptureOutcome;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CapturePort;
@@ -37,10 +38,17 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  */
 final readonly class CaptureAdapter implements CapturePort
 {
+    /**
+     * @param  ?CustomerIdentifier  $customerId  Whose payment this is, for the acquirers that record it on a
+     *   capture as well as on the authorization. Same shape as {@see CreateAdapter}: the host
+     *   names the customer when it builds the adapter, because the domain does not know that
+     *   providers have customers.
+     */
     public function __construct(
         private CapturesPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
+        private ?CustomerIdentifier $customerId = null,
     ) {}
 
     #[Override]
@@ -60,6 +68,7 @@ final readonly class CaptureAdapter implements CapturePort
             clientUniqueId: "$paymentIntentId:capture",
             authorizedAmount: $request->authorizedAmount,
             instrument: $request->instrument,
+            customerId: $this->customerId,
         ));
 
         if ($result->reference !== null) {

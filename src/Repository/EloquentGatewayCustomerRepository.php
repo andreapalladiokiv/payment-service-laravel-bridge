@@ -6,6 +6,7 @@ namespace Techork\PaymentService\Laravel\Repository;
 
 use Illuminate\Database\Eloquent\Model;
 use Override;
+use Techork\PaymentService\Common\Contract\CustomerIdentifier;
 use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\Models\GatewayCustomer;
@@ -36,21 +37,21 @@ final readonly class EloquentGatewayCustomerRepository implements GatewayCustome
     }
 
     #[Override]
-    public function find(GatewayId $gatewayId, string $customerId): ?string
+    public function find(GatewayId $gatewayId, CustomerIdentifier $customerId): ?string
     {
         $reference = $this->modelClass::query()
             ->where('gateway_id', $gatewayId->toString())
-            ->where('customer_id', $customerId)
+            ->where('customer_id', $customerId->toString())
             ->value('customer_reference');
 
         return is_string($reference) && $reference !== '' ? $reference : null;
     }
 
     #[Override]
-    public function saveReference(GatewayId $gatewayId, string $customerId, string $reference): void
+    public function saveReference(GatewayId $gatewayId, CustomerIdentifier $customerId, string $reference): void
     {
         $this->modelClass::unguarded(fn() => $this->modelClass::query()->updateOrCreate(
-            ['gateway_id' => $gatewayId, 'customer_id' => $customerId],
+            ['gateway_id' => $gatewayId, 'customer_id' => $customerId->toString()],
             ['customer_reference' => $reference],
         ));
     }

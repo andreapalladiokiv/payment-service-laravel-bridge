@@ -7,7 +7,7 @@ namespace Techork\PaymentService\Laravel;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Override;
 use Techork\PaymentService\Common\Contract\DecryptInterface;
-use Techork\PaymentService\Gateway\Contract\CustomerRepository;
+use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
 use Techork\PaymentService\Gateway\GatewayFactory;
 
@@ -26,7 +26,7 @@ use Techork\PaymentService\Gateway\GatewayFactory;
 final class LaravelGatewayFactory extends GatewayFactory
 {
     public function __construct(
-        CustomerRepository $customers,
+        GatewayCustomerRepository $customers,
         DecryptInterface $decrypter,
         GatewayInstrumentRepository $instruments,
         private readonly ConfigRepository $config,

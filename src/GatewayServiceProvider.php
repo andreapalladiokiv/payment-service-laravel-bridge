@@ -156,7 +156,7 @@ final class GatewayServiceProvider extends PackageServiceProvider
         $this->app->singleton(GatewayFactory::class, function (Application $app) {
             $manifest = $app->make(PackageManifest::class);
             $factory = new LaravelGatewayFactory(
-                $app->make(CustomerRepository::class),
+                $app->make(GatewayCustomerRepository::class),
                 $app->make(DecryptInterface::class),
                 $app->make(GatewayInstrumentRepository::class),
                 $app->make('config'),

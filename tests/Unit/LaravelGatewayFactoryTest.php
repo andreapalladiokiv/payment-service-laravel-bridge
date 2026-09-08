@@ -10,7 +10,8 @@ use Techork\PaymentService\Gateway\Command\PlacementCommand;
 use Techork\PaymentService\Gateway\Command\RebillingCommand;
 use Techork\PaymentService\Gateway\Command\CaptureCommand;
 use Techork\PaymentService\Gateway\Command\RefundCommand;
-use Techork\PaymentService\Gateway\Contract\CustomerRepository;
+use Techork\PaymentService\Gateway\Command\RegisterCustomerCommand;
+use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
 use Techork\PaymentService\Gateway\Contract\AuthorizationResult;
 use Techork\PaymentService\Gateway\Contract\GatewayResult;
 use Techork\PaymentService\Gateway\ValueObject\GatewayInfrastructure;
@@ -19,7 +20,7 @@ use Techork\PaymentService\Gateway\Contract\GatewayCredential;
 use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\LaravelGatewayFactory;
-use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
+use Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
 use Techork\PaymentService\Gateway\Command\IssueCardCommand;
 use Techork\PaymentService\Gateway\Command\TerminateCardCommand;
@@ -49,7 +50,7 @@ final class LaravelGatewayFactoryProbeGateway implements GatewayContract
     /** Derived in configure(), exactly as ConnexPay's clients derive their base URL. */
     public string $bakedBaseUrl = '';
 
-    public ?CustomerRepository $attachedRepository = null;
+    public ?GatewayCustomerRepository $attachedRepository = null;
 
     public ?GatewayInfrastructure $attachedInfrastructure = null;
 
@@ -128,6 +129,11 @@ final class LaravelGatewayFactoryProbeGateway implements GatewayContract
         throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
+    public function registerCustomer(RegisterCustomerCommand $command): RegistrationResult
+    {
+        throw new BadMethodCallException('The factory never reaches an operation.');
+    }
+
     public function issueVirtualCard(IssueCardCommand $command): VirtualCardResult
     {
         throw new BadMethodCallException('The factory never reaches an operation.');
@@ -199,7 +205,7 @@ function laravelGatewayFactoryUnderTest(array $config, array $names = []): Larav
     // The real repository, not a double: the factory hands it to the gateway and nothing
     // here calls it, so there is no behaviour to fake and an identity worth asserting.
     $factory = new LaravelGatewayFactory(
-        new EloquentCustomerRepository,
+        new EloquentGatewayCustomerRepository,
         Mockery::mock(DecryptInterface::class),
         Mockery::mock(GatewayInstrumentRepository::class, ['find' => null]),
         new ConfigRepository(['services' => $config]),
@@ -318,7 +324,7 @@ it('still holds the customer repository the parent attached after re-initialisin
     // The parent sets the repository between its initialize() and ours. It is a property
     // rather than a parameter, so a re-initialise must leave it standing; providers call it
     // during tokenization and a null there fails only at that point, far from here.
-    $repository = new EloquentCustomerRepository;
+    $repository = new EloquentGatewayCustomerRepository;
     $factory = new LaravelGatewayFactory(
         $repository,
         Mockery::mock(DecryptInterface::class),
@@ -358,7 +364,7 @@ it('is resolvable by the container, which is how the service provider builds it'
     // proves the alias is what the parameter names.
     $app = new Application(sys_get_temp_dir());
     $app->instance('config', new ConfigRepository(['services' => []]));
-    $app->bind(CustomerRepository::class, EloquentCustomerRepository::class);
+    $app->bind(GatewayCustomerRepository::class, EloquentGatewayCustomerRepository::class);
     // The repository is bound to the concrete the service provider names. The decrypter is not:
     // `LaravelEncrypter` wants the framework's `encrypter` service, which a bare Application has
     // no reason to boot. What is under test is that the container can READ the constructor, and a

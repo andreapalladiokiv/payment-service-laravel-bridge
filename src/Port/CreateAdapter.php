@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
+use Techork\PaymentService\Common\Contract\CustomerIdentifier;
 use Techork\PaymentService\Common\ValueObject\ThreeDS\ThreeDSResult;
 use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CreateOutcome;
@@ -25,10 +26,21 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  */
 final readonly class CreateAdapter implements CreatePort
 {
+    /**
+     * @param  ?CustomerIdentifier  $customerId  Whose payment this is.
+     *
+     * On the adapter for the reason the gateway id is: the host knows both when it decides how to
+     * route this payment, and neither is a fact the payment intent reads. `CreateRequest` and
+     * `CreatePaymentIntentCommand` are deliberately untouched — the command already carries a
+     * `gatewayId()` that `CreateRequest` does not, for exactly this reason, and adding a method to
+     * an interface every host implements to carry a value the aggregate ignores would be the
+     * wrong trade.
+     */
     public function __construct(
         private PlacesPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
+        private ?CustomerIdentifier $customerId = null,
     ) {}
 
     #[Override]
@@ -54,6 +66,7 @@ final readonly class CreateAdapter implements CreatePort
             billingAddress: $request->billingAddress,
             threeDS: $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
             initiation: $request->initiation,
+            customerId: $this->customerId,
         );
 
         // The capture method stays a choice of operation rather than a field on the command,
