@@ -30,13 +30,12 @@ use Symfony\Component\Serializer\Serializer;
 use Techork\PaymentService\Common\Contract\DecryptInterface;
 use Techork\PaymentService\Common\Contract\EncryptInterface;
 use Techork\PaymentService\Domain\Checkout\CheckoutAggregateRepositoryInterface;
-use Techork\PaymentService\Domain\Customer\CustomerAggregateRepositoryInterface;
 use Techork\PaymentService\Domain\PaymentIntent\PaymentIntentAggregateRepositoryInterface;
 use Techork\PaymentService\Domain\Subscription\SubscriptionAggregateRepositoryInterface;
 use Techork\PaymentService\Firewall\Dsl\FactSchema;
 use Techork\PaymentService\Firewall\Dsl\RuleCompiler;
 use Techork\PaymentService\Firewall\Dsl\RuleEvaluator;
-use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
+use Techork\PaymentService\Gateway\Contract\CustomerRepository;
 use Techork\PaymentService\Gateway\Contract\Gateway;
 use Techork\PaymentService\Gateway\Contract\GatewayCredentialRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
@@ -49,7 +48,6 @@ use Techork\PaymentService\Laravel\Encryption\LaravelEncrypter;
 use Techork\PaymentService\Laravel\EventSourcing\Consumers\LaravelMessageConsumer;
 use Techork\PaymentService\Laravel\EventSourcing\Decorators\GatewayIdMessageDecorator;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\CheckoutAggregateRepository;
-use Techork\PaymentService\Laravel\EventSourcing\Repositories\CustomerAggregateRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateMessageRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateSnapshotRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\PaymentIntentAggregateRepository;
@@ -61,7 +59,7 @@ use Techork\PaymentService\Laravel\Logger\Sanitizer\CardNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\Sanitizer\EmailSanitizer;
 use Techork\PaymentService\Laravel\Logger\Sanitizer\PhoneNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\SanitizingLogger;
-use Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository;
+use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayCredentialRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayTransactionRepository;
@@ -81,7 +79,7 @@ final class GatewayServiceProvider extends PackageServiceProvider
 {
     public $singletons = [
         GatewayCredentialRepository::class => EloquentGatewayCredentialRepository::class,
-        GatewayCustomerRepository::class => EloquentGatewayCustomerRepository::class,
+        CustomerRepository::class => EloquentCustomerRepository::class,
         GatewayInstrumentRepository::class => EloquentGatewayInstrumentRepository::class,
         GatewayTransactionRepository::class => EloquentGatewayTransactionRepository::class,
         VirtualCardReferenceRepository::class => EloquentVirtualCardReferenceRepository::class,
@@ -99,7 +97,6 @@ final class GatewayServiceProvider extends PackageServiceProvider
                 'create_gateways_table',
                 'create_gateway_references_table',
                 'create_gateway_customers_table',
-                'add_customer_id_to_gateway_customers',
                 'extend_webhook_calls',
                 'add_reference_index_to_gateway_references',
                 'add_metadata_to_gateway_references',
@@ -156,13 +153,7 @@ final class GatewayServiceProvider extends PackageServiceProvider
 
         $this->app->singleton(GatewayFactory::class, function (Application $app) {
             $manifest = $app->make(PackageManifest::class);
-            $factory = new LaravelGatewayFactory(
-                $app->make('config'),
-                $app->make(GatewayCustomerRepository::class),
-                // Bound by the host: only it can say who a customer is. Absent, the adapters
-                // fall back to building a provider-side customer from the payment's address,
-                // which is the behaviour this whole change exists to end.
-            );
+            $factory = new LaravelGatewayFactory($app->make(CustomerRepository::class), $app->make('config'));
             $factory->replace($this->discoverGateways($manifest));
             Omnipay::setFactory($factory);
 
@@ -323,7 +314,6 @@ final class GatewayServiceProvider extends PackageServiceProvider
             CheckoutAggregateRepositoryInterface::class => CheckoutAggregateRepository::class,
             PaymentIntentAggregateRepositoryInterface::class => PaymentIntentAggregateRepository::class,
             SubscriptionAggregateRepositoryInterface::class => SubscriptionAggregateRepository::class,
-            CustomerAggregateRepositoryInterface::class => CustomerAggregateRepository::class,
         ];
 
         foreach ($repositories as $interface => $implementation) {

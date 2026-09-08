@@ -6,12 +6,12 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Foundation\Application;
 use Omnipay\Common\AbstractGateway;
 use Omnipay\Common\Message\RequestInterface;
-use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
-use Techork\PaymentService\Gateway\Contract\ResolvesGatewayCustomers;
+use Techork\PaymentService\Gateway\Contract\CustomerRepository;
 use Techork\PaymentService\Gateway\Contract\Gateway as GatewayContract;
 use Techork\PaymentService\Gateway\Contract\GatewayCredential;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\LaravelGatewayFactory;
+use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
 
 /**
  * The only thing this factory adds to its parent is a merge, and the merge is a security
@@ -39,7 +39,7 @@ use Techork\PaymentService\Laravel\LaravelGatewayFactory;
  * re-initialise with a single `initialize()` of an explicit merge has to keep every
  * assertion here true.
  */
-final class LaravelGatewayFactoryProbeGateway extends AbstractGateway implements GatewayContract, ResolvesGatewayCustomers
+final class LaravelGatewayFactoryProbeGateway extends AbstractGateway implements GatewayContract
 {
     /**
      * Derived inside initialize() from the environment parameter, exactly as ConnexPay's
@@ -47,7 +47,7 @@ final class LaravelGatewayFactoryProbeGateway extends AbstractGateway implements
      */
     public string $bakedBaseUrl = '';
 
-    public function setGatewayCustomerRepository(GatewayCustomerRepository $repository): void {}
+    public ?CustomerRepository $attachedRepository = null;
 
     public function getName(): string
     {
@@ -99,6 +99,11 @@ final class LaravelGatewayFactoryProbeGateway extends AbstractGateway implements
             : 'https://sandbox.probe.test';
 
         return $this;
+    }
+
+    public function setCustomerRepository(CustomerRepository $repository): void
+    {
+        $this->attachedRepository = $repository;
     }
 
     public function createPaymentMethod(array $options = []): RequestInterface
@@ -186,7 +191,7 @@ function laravelGatewayFactoryUnderTest(array $config, array $names = []): Larav
 
     // The real repository, not a double: the factory hands it to the gateway and nothing
     // here calls it, so there is no behaviour to fake and an identity worth asserting.
-    $factory = new LaravelGatewayFactory(new ConfigRepository(['services' => $config]));
+    $factory = new LaravelGatewayFactory(new EloquentCustomerRepository, new ConfigRepository(['services' => $config]));
     $factory->replace($registry);
 
     return $factory;
@@ -297,6 +302,21 @@ it('gives each gateway name its own services entry', function () {
         ->and($productionSide->bakedBaseUrl)->toBe('https://live.probe.test');
 });
 
+it('still holds the customer repository the parent attached after re-initialising', function () {
+    // The parent sets the repository between its initialize() and ours. It is a property
+    // rather than a parameter, so a re-initialise must leave it standing; providers call it
+    // during tokenization and a null there fails only at that point, far from here.
+    $repository = new EloquentCustomerRepository;
+    $factory = new LaravelGatewayFactory(
+        $repository,
+        new ConfigRepository(['services' => ['probe_provider' => ['environment' => 'sandbox']]]),
+    );
+    $factory->replace(['probe_provider' => LaravelGatewayFactoryProbeGateway::class]);
+
+    $gateway = $factory->createForCredential(new LaravelGatewayFactoryProbeCredential(['environment' => 'production']));
+
+    expect($gateway->attachedRepository)->toBe($repository);
+});
 
 it('reuses the cached gateway for a repeated credential without losing the merged parameters', function () {
     // The parent caches per credential id and this override runs again on every hit, so the
@@ -324,8 +344,7 @@ it('is resolvable by the container, which is how the service provider builds it'
     // proves the alias is what the parameter names.
     $app = new Application(sys_get_temp_dir());
     $app->instance('config', new ConfigRepository(['services' => []]));
-    
+    $app->bind(CustomerRepository::class, EloquentCustomerRepository::class);
+
     expect($app->make(LaravelGatewayFactory::class))->toBeInstanceOf(LaravelGatewayFactory::class);
 });
-
-

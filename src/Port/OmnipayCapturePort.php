@@ -28,18 +28,10 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  */
 final readonly class OmnipayCapturePort implements CapturePort
 {
-    /**
-     * @param  ?string  $customerId  Whose payment this is, for the acquirers that record it on
-     *                               a capture as well as on the authorization. Same shape as
-     *                               {@see OmnipayCreatePort}: the host names the customer when
-     *                               it builds the port, because the domain does not know that
-     *                               providers have customers.
-     */
     public function __construct(
         private PaymentGatewayInterface $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
-        private ?string $customerId = null,
     ) {}
 
     #[Override]
@@ -59,7 +51,6 @@ final readonly class OmnipayCapturePort implements CapturePort
             "$paymentIntentId:capture",
             $request->authorizedAmount,
             $request->instrument,
-            $this->customerId,
         );
 
         if ($result->reference !== null) {

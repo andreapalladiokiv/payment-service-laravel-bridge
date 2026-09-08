@@ -17,7 +17,7 @@ use Techork\PaymentService\Laravel\Models\GatewayReference;
  * declarations carry consequences that only a database can show.
  *
  * `$guarded = ['*']` is total: it does not filter a payload, it refuses one, which is why
- * {@see \Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository} wraps its
+ * {@see \Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository} wraps its
  * write in `unguarded()`. Pinned from this side because a reader could take the guard for a
  * safety net that quietly drops unexpected keys, remove the `unguarded()` wrapper as
  * redundant, and break customer creation for every provider at once.
@@ -68,27 +68,29 @@ function gatewayCustomerModelSchema(): void
         });
     }
 
-    // Mirrors create_gateway_customers_table + add_customer_id_to_gateway_customers, both
-    // tables, unique keys included: they are what the model's relations are written around.
-    // Foreign keys are left off.
-    //
-    // `customer_id` is here even though this file does not use it. Three files in this process
-    // create this table "only when absent", so the first one to run decides its shape for all
-    // of them — a column missing here fails a sibling instead of this file, which is a long way
-    // from the cause.
+    // Mirrors create_gateway_customers_table, both tables, unique keys included: they are
+    // what the model's relations are written around. Foreign keys are left off.
     if (! Capsule::schema()->hasTable('gateway_customers')) {
         Capsule::schema()->create('gateway_customers', function ($table) {
             $table->uuid('id')->primary();
             $table->uuid('gateway_id');
-            $table->uuid('customer_id')->nullable();
             $table->string('customer_reference');
             $table->timestamps();
 
-            $table->unique(['gateway_id', 'customer_id']);
             $table->unique(['gateway_id', 'customer_reference']);
         });
     }
 
+    if (! Capsule::schema()->hasTable('gateway_reference_customer')) {
+        Capsule::schema()->create('gateway_reference_customer', function ($table) {
+            $table->uuid('gateway_reference_id');
+            $table->uuid('gateway_customer_id');
+
+            $table->unique('gateway_reference_id');
+        });
+    }
+
+    Capsule::table('gateway_reference_customer')->delete();
     Capsule::table('gateway_customers')->delete();
     Capsule::table('gateway_references')->delete();
     Capsule::table('gateways')->delete();
@@ -163,4 +165,27 @@ it('belongs to the gateway whose id it holds as a value object', function () {
     expect($resolved)->toBeInstanceOf(Gateway::class)
         ->and($resolved->getKey())->toBe($gateway->getKey())
         ->and($resolved->getGatewayName())->toBe('Nuvei');
+});
+
+it('reaches its instrument references through the pivot, and only its own', function () {
+    // The inverse of GatewayReference::customers(): given a provider-side customer, which
+    // vaulted instruments belong to it. Both custom pivot column names have to be right, and
+    // a wrong one reads as an empty set rather than an error — so the second customer's
+    // reference is here to prove the set is filtered and not simply empty.
+    $gateway = gatewayCustomerGatewayRow();
+    $mine = GatewayCustomer::query()->forceCreate(['gateway_id' => $gateway->getKey(), 'customer_reference' => 'cus_mine']);
+    $theirs = GatewayCustomer::query()->forceCreate(['gateway_id' => $gateway->getKey(), 'customer_reference' => 'cus_theirs']);
+
+    foreach ([[$mine, 'tok_mine'], [$theirs, 'tok_theirs']] as [$customer, $reference]) {
+        $row = GatewayReference::query()->forceCreate([
+            'gateway_id' => $gateway->getKey(),
+            'referenceable_type' => 'token',
+            'referenceable_id' => Uuid::uuid4()->toString(),
+            'reference' => $reference,
+        ]);
+        $row->customers()->attach($customer->getKey());
+    }
+
+    expect($mine->references()->pluck('reference')->all())->toBe(['tok_mine'])
+        ->and($theirs->references()->pluck('reference')->all())->toBe(['tok_theirs']);
 });

@@ -6,7 +6,7 @@ namespace Techork\PaymentService\Laravel;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Override;
-use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
+use Techork\PaymentService\Gateway\Contract\CustomerRepository;
 use Techork\PaymentService\Gateway\Contract\Gateway;
 use Techork\PaymentService\Gateway\Contract\GatewayCredential;
 use Techork\PaymentService\Gateway\GatewayFactory;
@@ -25,10 +25,10 @@ use Techork\PaymentService\Gateway\GatewayFactory;
 final class LaravelGatewayFactory extends GatewayFactory
 {
     public function __construct(
+        CustomerRepository $repository,
         private readonly ConfigRepository $config,
-        ?GatewayCustomerRepository $gatewayCustomers = null,
     ) {
-        parent::__construct($gatewayCustomers);
+        parent::__construct($repository);
     }
 
     #[Override]

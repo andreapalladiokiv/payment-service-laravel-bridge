@@ -28,12 +28,12 @@ credential can never leak into a dev build (and clients that bake base URLs at
 | --- | --- | --- |
 | `Models\Gateway` | `gateways` | Per-tenant credential record, implements `GatewayCredential`; `credentials` cast `encrypted:json` |
 | `Models\GatewayReference` | `gateway_references` | Polymorphic map (gateway, referenceable_type, referenceable_id) → gateway-side `reference`, plus `failure_reason` and JSON `metadata` |
-| `Models\GatewayCustomer` | `gateway_customers` | Gateway-side customer references, keyed `(gateway_id, customer_id)` — one reference per gateway per customer. The old `gateway_reference_customer` pivot keyed them by *instrument* instead; nothing reads it any more and it survives only as a record of which cards a provider knew under one customer |
+| `Models\GatewayCustomer` | `gateway_customers` (+ pivot `gateway_reference_customer`) | Gateway-side customer references; the pivot's unique `gateway_reference_id` ties a reference to exactly one customer |
 | `Models\ShreddingValue` | `shredding_values` | sha256-hash-keyed plaintext PII store |
 | `Webhook\Model\WebhookCall` | `webhook_calls` (extended) | Spatie webhook record + `gateway_id`, `external_id`, `status`, `processed_at` |
 
 Repositories (all Eloquent-backed, bound as singletons):
-`EloquentGatewayCredentialRepository`, `EloquentGatewayCustomerRepository`,
+`EloquentGatewayCredentialRepository`, `EloquentCustomerRepository`,
 `EloquentGatewayInstrumentRepository` (morph type = instrument `::type()`;
 only `Token` / `PaymentMethod` instruments carry an id worth persisting),
 `EloquentGatewayTransactionRepository` (morph types `payment_intent` /

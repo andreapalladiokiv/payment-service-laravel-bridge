@@ -24,21 +24,10 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  */
 final readonly class OmnipayCreatePort implements CreatePort
 {
-    /**
-     * @param  ?string  $customerId  Whose payment this is.
-     *
-     * On the port for the reason the gateway id is: the host knows both when it decides how to
-     * route this payment, and neither is a fact the payment intent reads. `CreateRequest` and
-     * `CreatePaymentIntentCommand` are deliberately untouched — the command already carries a
-     * `gatewayId()` that `CreateRequest` does not, for exactly this reason, and adding a method
-     * to an interface every host implements to carry a value the aggregate ignores would be the
-     * wrong trade.
-     */
     public function __construct(
         private PaymentGatewayInterface $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
-        private ?string $customerId = null,
     ) {}
 
     #[Override]
@@ -59,8 +48,8 @@ final readonly class OmnipayCreatePort implements CreatePort
         $threeDS = $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null;
 
         $result = $request->captureMethod === CaptureMethod::Immediate
-            ? $this->gateway->charge($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation, customerId: $this->customerId)
-            : $this->gateway->authorize($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation, customerId: $this->customerId);
+            ? $this->gateway->charge($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation)
+            : $this->gateway->authorize($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation);
 
         if ($result->reference !== null) {
             $this->transactionRepository->saveForPaymentIntent($this->gatewayId, $clientUniqueId, $result->reference, $result->metadata);
