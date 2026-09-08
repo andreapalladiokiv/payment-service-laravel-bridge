@@ -5,12 +5,18 @@ declare(strict_types=1);
 use Money\Currency;
 use Money\Money;
 use Techork\PaymentService\Common\ValueObject\BillingAddress;
+use Techork\PaymentService\Common\ShreddingStubs;
 use Techork\PaymentService\Common\ValueObject\Country;
+use Techork\PaymentService\Common\ValueObject\CustomerIdentity;
+use Techork\PaymentService\Common\ValueObject\Email;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
 use Techork\PaymentService\Common\ValueObject\MerchantDescriptor;
+use Techork\PaymentService\Common\ValueObject\PhoneNumber;
 use Techork\PaymentService\Common\ValueObject\State;
 use Techork\PaymentService\Domain\Checkout\Event\CheckoutCancelled;
 use Techork\PaymentService\Domain\Checkout\Event\CheckoutCreated;
+use Techork\PaymentService\Domain\Customer\Event\CustomerIdentityChanged;
+use Techork\PaymentService\Domain\Customer\Event\CustomerRegistered;
 use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Event\PaymentIntentImported;
 use Techork\PaymentService\Domain\PaymentIntent\PaymentIntentStatus;
@@ -221,4 +227,87 @@ it('denormalizes into the class it is handed', function () {
     expect($serializer->serializePayload(new CheckoutCancelled))->toBe([])
         ->and($serializer->unserializePayload(CheckoutCancelled::class, []))
         ->toBeInstanceOf(CheckoutCancelled::class);
+});
+
+/**
+ * The customer's identity is the densest value-object graph any event carries: two strings, an
+ * {@see Email} and a {@see PhoneNumber}, every one of them `#[Pii]`. The phone is the reason
+ * this is asserted rather than assumed — `PhoneNumber` holds a `libphonenumber\PhoneNumber`
+ * that no constructor can rebuild from its properties, which is what
+ * {@see \Techork\PaymentService\Laravel\Serializer\PhoneNumberNormalizer} exists for, and
+ * `State` taught this codebase that such a value object is unreplayable until something in the
+ * chain knows about it. So these go through the chain the service provider builds, not a copy.
+ */
+function payloadSerializerIdentity(): CustomerIdentity
+{
+    return new CustomerIdentity(
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: new Email('ada@example.com'),
+        phone: new PhoneNumber('+12025550123'),
+    );
+}
+
+it('round-trips a registered customer through the production chain', function () {
+    $serializer = payloadSerializerFor();
+    $event = new CustomerRegistered(payloadSerializerIdentity());
+
+    // Through JSON, because that is what the `payload` column holds: a `libphonenumber`
+    // object surviving in memory and dying on `json_decode` is precisely the failure mode
+    // a dedicated normalizer removes.
+    $throughJson = json_decode(json_encode($serializer->serializePayload($event), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+
+    expect($serializer->unserializePayload(CustomerRegistered::class, $throughJson))->toEqual($event);
+});
+
+it('round-trips a changed identity through the production chain', function () {
+    $serializer = payloadSerializerFor();
+    $event = new CustomerIdentityChanged(payloadSerializerIdentity());
+
+    $throughJson = json_decode(json_encode($serializer->serializePayload($event), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+
+    expect($serializer->unserializePayload(CustomerIdentityChanged::class, $throughJson))->toEqual($event);
+});
+
+it('writes the identity as four hashes and nothing legible', function () {
+    $store = new EventStreamPiiStore;
+    $serializer = payloadSerializerFor($store);
+
+    $payload = $serializer->serializePayload(new CustomerRegistered(payloadSerializerIdentity()));
+    $encoded = json_encode($payload, JSON_THROW_ON_ERROR);
+
+    // Unlike a `BillingAddress`, an identity has no non-PII field: there is no city here to
+    // stay legible for AVS, so every one of the four keys must be a hash. The shape is pinned
+    // because rows already written follow it — the phone in particular must be a single hash
+    // rather than the nested `{number: {countryCode: …}}` its property shape would give.
+    expect(array_keys($payload['identity']))->toBe(['firstName', 'lastName', 'email', 'phone'])
+        ->and($payload['identity'])->each->toBeString()
+        ->and($encoded)->not->toContain('Ada')
+        ->and($encoded)->not->toContain('Lovelace')
+        ->and($encoded)->not->toContain('ada@example.com')
+        ->and($encoded)->not->toContain('2025550123')
+        ->and($store->byHash)->toHaveCount(4);
+
+    $rebuilt = $serializer->unserializePayload(CustomerRegistered::class, $payload);
+
+    expect($rebuilt->identity->firstName)->toBe('Ada')
+        ->and((string) $rebuilt->identity->email)->toBe('ada@example.com');
+});
+
+it('leaves a forgotten customer replayable with stubs in place of the identity', function () {
+    $store = new EventStreamPiiStore;
+    $serializer = payloadSerializerFor($store);
+
+    $payload = $serializer->serializePayload(new CustomerRegistered(payloadSerializerIdentity()));
+
+    // What `CustomerForgotten` promises: the identity is gone and the stream still reads. If
+    // the phone's stub could not be rebuilt, replaying a forgotten customer would throw and
+    // erasure would take the aggregate with it.
+    $store->byHash = [];
+
+    $rebuilt = $serializer->unserializePayload(CustomerRegistered::class, $payload);
+
+    expect($rebuilt->identity->firstName)->toBe(ShreddingStubs::NAME)
+        ->and((string) $rebuilt->identity->email)->toBe(ShreddingStubs::EMAIL)
+        ->and((string) $rebuilt->identity->phone)->toBe(ShreddingStubs::PHONE);
 });
