@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Key a gateway's customer reference on our customer instead of on an instrument.
+ *
+ * `gateway_customers` reached our side only through `gateway_reference_customer`, which links a
+ * customer to a *gateway reference* — an instrument's. That is why a raw-card payment could
+ * never resolve a customer and why an expiring token could: the key was the instrument, not the
+ * person.
+ *
+ * `customer_id` is nullable and existing rows keep a null. Which of our customers a provider-side
+ * customer is depends on which payment methods are one person, and nothing here decides that —
+ * the backfill is the application's (A2 in `docs/customer-domain-plan`), and A2 is expected to
+ * leave this column alone anyway: with one customer per payment method, a row covering three
+ * cards has three candidates and no answer. It fills as customers are named on new activity.
+ *
+ * The instrument-keyed lookup that used to answer for those rows is gone from the code rather
+ * than kept for a transition: as a fallback it would have made this change optional, taken by
+ * every caller that forgot to name a customer, and it is that lookup which registered
+ * provider-side customers under whatever address rode along with a payment — the behaviour this
+ * whole change exists to end. A customer with no `customer_id` now resolves to no provider
+ * customer, which surfaces as a refused registration rather than an invented one.
+ *
+ * `gateway_reference_customer` is left standing with no reader. It is the only surviving record
+ * of which cards a provider knew under one customer, and that is the evidence anything that
+ * later decides two of our customers are one person would start from. Kept as history, not as a
+ * dependency — nothing in this package reads it, and nothing should start to. Dropping it is the
+ * application's call, once it has taken what it needs.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('gateway_customers', function (Blueprint $table) {
+            $table->uuid('customer_id')->nullable()->after('gateway_id');
+
+            // Not UNIQUE on its own: one customer has one reference *per gateway*, and the same
+            // customer legitimately has a different one at each. Re-pointing a gateway at a
+            // different reference orphans whatever the old one owned, and this is what refuses
+            // it without the domain learning that providers exist.
+            $table->unique(['gateway_id', 'customer_id']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('gateway_customers', function (Blueprint $table) {
+            $table->dropUnique(['gateway_id', 'customer_id']);
+            $table->dropColumn('customer_id');
+        });
+    }
+};

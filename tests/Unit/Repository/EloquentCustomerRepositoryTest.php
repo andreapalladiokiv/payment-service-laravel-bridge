@@ -68,16 +68,22 @@ function bootGatewayCustomerSchema(): void
         });
     }
 
-    // Mirrors create_gateway_customers_table. Foreign keys are left off — this exercises the
-    // repository, not referential integrity — but both unique keys are kept, because they are
-    // what `firstOrCreate` and `sync` are written around and the point of several tests below.
+    // Mirrors create_gateway_customers_table + add_customer_id_to_gateway_customers. Foreign
+    // keys are left off — this exercises the repository, not referential integrity — but every
+    // unique key is kept, because they are what `firstOrCreate` and `sync` are written around
+    // and the point of several tests below.
+    //
+    // `customer_id` is unread here and present anyway: three files create this table "only when
+    // absent", so the first to run decides its shape for all of them.
     if (! Capsule::schema()->hasTable('gateway_customers')) {
         Capsule::schema()->create('gateway_customers', function ($table) {
             $table->uuid('id')->primary();
             $table->uuid('gateway_id');
+            $table->uuid('customer_id')->nullable();
             $table->string('customer_reference');
             $table->timestamps();
 
+            $table->unique(['gateway_id', 'customer_id']);
             $table->unique(['gateway_id', 'customer_reference']);
         });
     }

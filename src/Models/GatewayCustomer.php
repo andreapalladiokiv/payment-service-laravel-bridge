@@ -14,6 +14,7 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 /**
  * @property string $id
  * @property GatewayId $gateway_id
+ * @property ?string $customer_id
  * @property string $customer_reference
  */
 final class GatewayCustomer extends Model

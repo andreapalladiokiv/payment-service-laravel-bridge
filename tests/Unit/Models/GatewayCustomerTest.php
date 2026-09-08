@@ -68,15 +68,23 @@ function gatewayCustomerModelSchema(): void
         });
     }
 
-    // Mirrors create_gateway_customers_table, both tables, unique keys included: they are
-    // what the model's relations are written around. Foreign keys are left off.
+    // Mirrors create_gateway_customers_table + add_customer_id_to_gateway_customers, both
+    // tables, unique keys included: they are what the model's relations are written around.
+    // Foreign keys are left off.
+    //
+    // `customer_id` is here even though this file does not use it. Three files in this process
+    // create this table "only when absent", so the first one to run decides its shape for all
+    // of them — a column missing here fails a sibling instead of this file, which is a long way
+    // from the cause.
     if (! Capsule::schema()->hasTable('gateway_customers')) {
         Capsule::schema()->create('gateway_customers', function ($table) {
             $table->uuid('id')->primary();
             $table->uuid('gateway_id');
+            $table->uuid('customer_id')->nullable();
             $table->string('customer_reference');
             $table->timestamps();
 
+            $table->unique(['gateway_id', 'customer_id']);
             $table->unique(['gateway_id', 'customer_reference']);
         });
     }

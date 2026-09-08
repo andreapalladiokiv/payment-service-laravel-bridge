@@ -36,6 +36,7 @@ use Techork\PaymentService\Firewall\Dsl\FactSchema;
 use Techork\PaymentService\Firewall\Dsl\RuleCompiler;
 use Techork\PaymentService\Firewall\Dsl\RuleEvaluator;
 use Techork\PaymentService\Gateway\Contract\CustomerRepository;
+use Techork\PaymentService\Gateway\Contract\GatewayCustomerRepository;
 use Techork\PaymentService\Gateway\Contract\Gateway;
 use Techork\PaymentService\Gateway\Contract\GatewayCredentialRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
@@ -61,6 +62,7 @@ use Techork\PaymentService\Laravel\Logger\Sanitizer\PhoneNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\SanitizingLogger;
 use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayCredentialRepository;
+use Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayTransactionRepository;
 use Techork\PaymentService\Laravel\Repository\EloquentVirtualCardReferenceRepository;
@@ -79,6 +81,7 @@ final class GatewayServiceProvider extends PackageServiceProvider
     public $singletons = [
         GatewayCredentialRepository::class => EloquentGatewayCredentialRepository::class,
         CustomerRepository::class => EloquentCustomerRepository::class,
+        GatewayCustomerRepository::class => EloquentGatewayCustomerRepository::class,
         GatewayInstrumentRepository::class => EloquentGatewayInstrumentRepository::class,
         GatewayTransactionRepository::class => EloquentGatewayTransactionRepository::class,
         VirtualCardReferenceRepository::class => EloquentVirtualCardReferenceRepository::class,
@@ -96,6 +99,7 @@ final class GatewayServiceProvider extends PackageServiceProvider
                 'create_gateways_table',
                 'create_gateway_references_table',
                 'create_gateway_customers_table',
+                'add_customer_id_to_gateway_customers',
                 'extend_webhook_calls',
                 'add_reference_index_to_gateway_references',
                 'add_metadata_to_gateway_references',
