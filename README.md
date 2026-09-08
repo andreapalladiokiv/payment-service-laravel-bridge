@@ -9,9 +9,8 @@ all the wiring: `GatewayServiceProvider` and `Webhook\WebhookServiceProvider`.
 ## Gateway wiring
 
 `GatewayServiceProvider` binds every Gateway-package repository contract to an
-Eloquent implementation and builds `LaravelGatewayFactory` (also installed as
-the global Omnipay factory). Gateway implementations are **discovered, not
-hard-wired**: each gateway package declares its class under
+Eloquent implementation and builds `LaravelGatewayFactory`. Gateway
+implementations are **discovered, not hard-wired**: each gateway package declares its class under
 `extra.laravel.gateway` in its own `composer.json`; the provider walks
 Laravel's `PackageManifest` and registers every class implementing
 `Gateway`, keyed by `getName()`.
@@ -80,11 +79,11 @@ so the type survives storage. The event stream itself never needs rewriting.
 
 | Class | Domain port | Behavior |
 | --- | --- | --- |
-| `Port\OmnipayCreatePort` | `CreatePort` | `charge()` for `CaptureMethod::Immediate`, `authorize()` otherwise; persists reference + metadata; decline → `GatewayDeclinedException` |
+| `Port\CreateAdapter` | `CreatePort` | `charge()` for `CaptureMethod::Immediate`, `authorize()` otherwise; persists reference + metadata; decline → `GatewayDeclinedException` |
 | `Port\FraudScreeningCreatePort` | `CreatePort` (decorator) | Screens CIT card payments through `RiskDecisionPort`; short-circuits with a `ThreeDSChallenge` when step-up is required and no successful 3DS result is attached. MIT, non-card instruments and already-authenticated 3DS pass straight through |
-| `Port\OmnipayCapturePort` | `CapturePort` | Captures the stored gateway transaction with idempotency key `{paymentIntentId}:capture` |
-| `Port\OmnipayCancelPort` | `CancelPort` | Voids the stored gateway transaction with idempotency key `{paymentIntentId}:cancel` |
-| `Port\OmnipayRefundPort` | `RefundPort` | Refunds against the parent PI's gateway transaction; saves the refund reference |
+| `Port\CaptureAdapter` | `CapturePort` | Captures the stored gateway transaction with idempotency key `{paymentIntentId}:capture` |
+| `Port\CancelAdapter` | `CancelPort` | Voids the stored gateway transaction with idempotency key `{paymentIntentId}:cancel` |
+| `Port\RefundAdapter` | `RefundPort` | Refunds against the parent PI's gateway transaction; saves the refund reference |
 
 Create/capture ports carry the gateway's synchronous FX `convertedAmount` into
 `CreateOutcome` / `CaptureOutcome`.

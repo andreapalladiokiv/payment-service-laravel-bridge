@@ -13,11 +13,15 @@ use Techork\PaymentService\Domain\PaymentIntent\Refund\ValueObject\RefundId;
 use Techork\PaymentService\Domain\PaymentIntent\ValueObject\PaymentIntentId;
 use Techork\PaymentService\Gateway\Contract\GatewayResult;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
-use Techork\PaymentService\Laravel\Port\OmnipayCancelPort;
-use Techork\PaymentService\Laravel\Port\OmnipayCapturePort;
-use Techork\PaymentService\Laravel\Port\OmnipayRefundPort;
+use Techork\PaymentService\Laravel\Port\CancelAdapter;
+use Techork\PaymentService\Laravel\Port\CaptureAdapter;
+use Techork\PaymentService\Laravel\Port\RefundAdapter;
+use Techork\PaymentService\Gateway\Command\CaptureCommand;
+use Techork\PaymentService\Gateway\Role\CapturesPayments;
+use Techork\PaymentService\Gateway\Role\CancelsPayments;
+use Techork\PaymentService\Gateway\Role\RefundsPayments;
+use Techork\PaymentService\Gateway\Role\PlacesPayments;
 
 /**
  * Reading the acquirer's reference and writing it now live in the same layer. The
@@ -35,12 +39,41 @@ function referenceRepo(?string $reference): GatewayTransactionRepository
     return $repo;
 }
 
-function unreachableGateway(): PaymentGatewayInterface
+/**
+ * Capture has its own unreachable double now: it depends on {@see CapturesPayments}, one method
+ * instead of the whole gateway, which is the point of the split and also why it can no longer
+ * share this one.
+ */
+function unreachableCaptureGateway(): CapturesPayments
 {
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(CapturesPayments::class);
     $gateway->shouldReceive('capture')->never();
+
+    return $gateway;
+}
+
+function unreachableCancelGateway(): CancelsPayments
+{
+    $gateway = Mockery::mock(CancelsPayments::class);
     $gateway->shouldReceive('cancel')->never();
+
+    return $gateway;
+}
+
+function unreachableRefundGateway(): RefundsPayments
+{
+    $gateway = Mockery::mock(RefundsPayments::class);
     $gateway->shouldReceive('refund')->never();
+    $gateway->shouldReceive('retryRefund')->never();
+
+    return $gateway;
+}
+
+function unreachableGateway(): PlacesPayments
+{
+    $gateway = Mockery::mock(PlacesPayments::class);
+    $gateway->shouldReceive('authorize')->never();
+    $gateway->shouldReceive('charge')->never();
 
     return $gateway;
 }
@@ -48,14 +81,14 @@ function unreachableGateway(): PaymentGatewayInterface
 it('hands the resolved reference to the gateway, which no longer looks it up', function () {
     $seen = null;
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
-    $gateway->shouldReceive('capture')->once()->andReturnUsing(function (...$args) use (&$seen) {
-        $seen = $args[1];
+    $gateway = Mockery::mock(CapturesPayments::class);
+    $gateway->shouldReceive('capture')->once()->andReturnUsing(function (CaptureCommand $command) use (&$seen) {
+        $seen = $command->transactionReference;
 
         return GatewayResult::succeeded('cap_1');
     });
 
-    new OmnipayCapturePort($gateway, referenceRepo('auth_ref'), GatewayId::generate())
+    new CaptureAdapter($gateway, referenceRepo('auth_ref'), GatewayId::generate())
         ->capture(new CaptureRequest(
             PaymentIntentId::generate(),
             new Money(100, new Currency('USD')),
@@ -67,7 +100,7 @@ it('hands the resolved reference to the gateway, which no longer looks it up', f
 });
 
 it('refuses a capture with no recorded reference instead of asking the acquirer', function () {
-    $port = new OmnipayCapturePort(unreachableGateway(), referenceRepo(null), GatewayId::generate());
+    $port = new CaptureAdapter(unreachableCaptureGateway(), referenceRepo(null), GatewayId::generate());
 
     expect(fn () => $port->capture(new CaptureRequest(
             PaymentIntentId::generate(),
@@ -79,7 +112,7 @@ it('refuses a capture with no recorded reference instead of asking the acquirer'
 });
 
 it('refuses a refund with no recorded reference instead of recording RefundFailed', function () {
-    $port = new OmnipayRefundPort(unreachableGateway(), referenceRepo(null), GatewayId::generate());
+    $port = new RefundAdapter(unreachableRefundGateway(), referenceRepo(null), GatewayId::generate());
 
     // Not GatewayDeclinedException: that is what the aggregate turns into RefundFailed,
     // and nobody declined anything here.
@@ -97,7 +130,7 @@ it('stops reporting a missing reference as an issuer refusing a cancellation', f
     // with GatewayResult::failed(), the port turned that into GatewayDeclinedException,
     // and the aggregate recorded a failure — telling operators an issuer said no to a
     // cancellation it never received.
-    $port = new OmnipayCancelPort(unreachableGateway(), referenceRepo(null), GatewayId::generate());
+    $port = new CancelAdapter(unreachableCancelGateway(), referenceRepo(null), GatewayId::generate());
 
     $thrown = null;
 
@@ -113,16 +146,16 @@ it('stops reporting a missing reference as an issuer refusing a cancellation', f
 });
 
 it('forwards the hold and the instrument, without which ConnexPay takes the full amount', function () {
-    // The two arguments PaymentGatewayInterface::capture has always accepted and this
+    // The two arguments the gateway roles::capture has always accepted and this
     // port never passed. ConnexPayGateway::capture reads them to notice that a partial
     // capture was asked for and to build the void-and-resell its provider requires;
     // its own docblock says that without them "the full hold would be captured
     // silently". The branch had tests. Nothing reached it.
-    $seen = [];
+    $seen = null;
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
-    $gateway->shouldReceive('capture')->once()->andReturnUsing(function (...$args) use (&$seen) {
-        $seen = $args;
+    $gateway = Mockery::mock(CapturesPayments::class);
+    $gateway->shouldReceive('capture')->once()->andReturnUsing(function (CaptureCommand $command) use (&$seen) {
+        $seen = $command;
 
         return GatewayResult::succeeded('cap_1');
     });
@@ -131,11 +164,12 @@ it('forwards the hold and the instrument, without which ConnexPay takes the full
     $partial = new Money(300, new Currency('USD'));
     $instrument = Mockery::mock(PaymentInstrument::class);
 
-    new OmnipayCapturePort($gateway, referenceRepo('auth_ref'), GatewayId::generate())
+    new CaptureAdapter($gateway, referenceRepo('auth_ref'), GatewayId::generate())
         ->capture(new CaptureRequest(PaymentIntentId::generate(), $partial, $authorized, $instrument));
 
-    // (gatewayId, reference, amount, clientUniqueId, authorizedAmount, instrument)
-    expect($seen[2])->toBe($partial)
-        ->and($seen[4])->toBe($authorized)
-        ->and($seen[5])->toBe($instrument);
+    // Named fields on one object, where this used to index into six positional arguments and the
+    // comment above it had to say which was which.
+    expect($seen->amount)->toBe($partial)
+        ->and($seen->authorizedAmount)->toBe($authorized)
+        ->and($seen->instrument)->toBe($instrument);
 });

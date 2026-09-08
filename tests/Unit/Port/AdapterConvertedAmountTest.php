@@ -14,15 +14,16 @@ use Techork\PaymentService\Domain\PaymentIntent\ValueObject\PaymentIntentId;
 use Techork\PaymentService\Gateway\Contract\AuthorizationResult;
 use Techork\PaymentService\Gateway\Contract\GatewayResult;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
-use Techork\PaymentService\Laravel\Port\OmnipayCapturePort;
-use Techork\PaymentService\Laravel\Port\OmnipayCreatePort;
+use Techork\PaymentService\Laravel\Port\CaptureAdapter;
+use Techork\PaymentService\Laravel\Port\CreateAdapter;
+use Techork\PaymentService\Gateway\Role\CapturesPayments;
+use Techork\PaymentService\Gateway\Role\PlacesPayments;
 
 it('carries the FX convertedAmount from a charge result into the CreateOutcome', function () {
     $converted = new Money(5712, new Currency('USD'));
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesPayments::class);
     $gateway->shouldReceive('charge')->once()->andReturn(
         AuthorizationResult::succeeded('ch_1')->withConvertedAmount($converted),
     );
@@ -31,7 +32,7 @@ it('carries the FX convertedAmount from a charge result into the CreateOutcome',
     $txRepo->shouldReceive('findForPaymentIntent')->andReturnNull();
     $txRepo->shouldReceive('saveForPaymentIntent')->once();
 
-    $port = new OmnipayCreatePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CreateAdapter($gateway, $txRepo, GatewayId::generate());
 
     $outcome = $port->create(new CreateRequest(
         paymentIntentId: PaymentIntentId::generate(),
@@ -46,14 +47,14 @@ it('carries the FX convertedAmount from a charge result into the CreateOutcome',
 });
 
 it('leaves CreateOutcome convertedAmount null when the charge reports none', function () {
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesPayments::class);
     $gateway->shouldReceive('charge')->once()->andReturn(AuthorizationResult::succeeded('ch_2'));
 
     $txRepo = Mockery::mock(GatewayTransactionRepository::class);
     $txRepo->shouldReceive('findForPaymentIntent')->andReturnNull();
     $txRepo->shouldReceive('saveForPaymentIntent')->once();
 
-    $port = new OmnipayCreatePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CreateAdapter($gateway, $txRepo, GatewayId::generate());
 
     $outcome = $port->create(new CreateRequest(
         paymentIntentId: PaymentIntentId::generate(),
@@ -69,7 +70,7 @@ it('leaves CreateOutcome convertedAmount null when the charge reports none', fun
 it('carries the FX convertedAmount from a capture result into the CaptureOutcome', function () {
     $converted = new Money(9140, new Currency('USD'));
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(CapturesPayments::class);
     $gateway->shouldReceive('capture')->once()->andReturn(
         GatewayResult::succeeded('cap_1')->withConvertedAmount($converted),
     );
@@ -80,7 +81,7 @@ it('carries the FX convertedAmount from a capture result into the CaptureOutcome
     $txRepo->shouldReceive('findForPaymentIntent')->once()->andReturn('auth_ref');
     $txRepo->shouldReceive('saveForPaymentIntent')->once();
 
-    $port = new OmnipayCapturePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CaptureAdapter($gateway, $txRepo, GatewayId::generate());
 
     $outcome = $port->capture(new CaptureRequest(
         paymentIntentId: PaymentIntentId::generate(),

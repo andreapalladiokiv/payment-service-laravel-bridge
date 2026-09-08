@@ -18,7 +18,6 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Foundation\PackageManifest;
 use Illuminate\Validation\Factory;
 use Illuminate\Validation\InvokableValidationRule;
-use Omnipay\Omnipay;
 use Override;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
@@ -40,7 +39,6 @@ use Techork\PaymentService\Gateway\Contract\Gateway;
 use Techork\PaymentService\Gateway\Contract\GatewayCredentialRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
 use Techork\PaymentService\Gateway\Contract\VirtualCardReferenceRepository;
 use Techork\PaymentService\Gateway\GatewayFactory;
 use Techork\PaymentService\Laravel\Encryption\EncrypterAwareInterface;
@@ -73,7 +71,6 @@ use Techork\PaymentService\Laravel\Serializer\PayloadSerializerFactory;
 use Techork\PaymentService\Laravel\Shredding\EloquentPiiStore;
 use Techork\PaymentService\Laravel\Shredding\PiiStore;
 use Techork\PaymentService\Gateway\Logger\GatewayLoggerInterface;
-use Techork\PaymentService\Gateway\PaymentGatewayRouter;
 
 final class GatewayServiceProvider extends PackageServiceProvider
 {
@@ -137,7 +134,6 @@ final class GatewayServiceProvider extends PackageServiceProvider
     #[Override]
     public function packageRegistered(): void
     {
-        $this->app->singleton(PaymentGatewayInterface::class, PaymentGatewayRouter::class);
 
         $this->app->singleton(GatewayLoggerInterface::class, function (Application $app) {
             // `tagged()` is annotated as a bare `iterable`, so neither its keys nor its
@@ -153,9 +149,13 @@ final class GatewayServiceProvider extends PackageServiceProvider
 
         $this->app->singleton(GatewayFactory::class, function (Application $app) {
             $manifest = $app->make(PackageManifest::class);
-            $factory = new LaravelGatewayFactory($app->make(CustomerRepository::class), $app->make('config'));
+            $factory = new LaravelGatewayFactory(
+                $app->make(CustomerRepository::class),
+                $app->make(DecryptInterface::class),
+                $app->make(GatewayInstrumentRepository::class),
+                $app->make('config'),
+            );
             $factory->replace($this->discoverGateways($manifest));
-            Omnipay::setFactory($factory);
 
             return $factory;
         });

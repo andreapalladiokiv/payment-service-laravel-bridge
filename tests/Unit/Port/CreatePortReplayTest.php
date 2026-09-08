@@ -11,10 +11,10 @@ use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Port\Request\CreateRequest;
 use Techork\PaymentService\Domain\PaymentIntent\ValueObject\PaymentIntentId;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
-use Techork\PaymentService\Laravel\Port\OmnipayCreatePort;
+use Techork\PaymentService\Laravel\Port\CreateAdapter;
 use Techork\PaymentService\Laravel\Port\PaymentAlreadyPlaced;
+use Techork\PaymentService\Gateway\Role\PlacesPayments;
 
 function replayCreateRequest(PaymentIntentId $id): CreateRequest
 {
@@ -37,7 +37,7 @@ function replayCreateRequest(PaymentIntentId $id): CreateRequest
  * whatever the clock says.
  */
 it('does not reach the acquirer for a payment it has already placed', function () {
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesPayments::class);
     $gateway->shouldNotReceive('authorize');
     $gateway->shouldNotReceive('charge');
 
@@ -45,7 +45,7 @@ it('does not reach the acquirer for a payment it has already placed', function (
     $txRepo->shouldReceive('findForPaymentIntent')->andReturn('cxp-guid-already-placed');
     $txRepo->shouldNotReceive('saveForPaymentIntent');
 
-    $port = new OmnipayCreatePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CreateAdapter($gateway, $txRepo, GatewayId::generate());
 
     $port->create(replayCreateRequest(PaymentIntentId::generate()));
 })->throws(PaymentAlreadyPlaced::class);
@@ -59,11 +59,11 @@ it('does not reach the acquirer for a payment it has already placed', function (
 it('says which payment it is refusing to place twice', function () {
     $id = PaymentIntentId::generate();
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesPayments::class);
     $txRepo = Mockery::mock(GatewayTransactionRepository::class);
     $txRepo->shouldReceive('findForPaymentIntent')->andReturn('cxp-guid');
 
-    $port = new OmnipayCreatePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CreateAdapter($gateway, $txRepo, GatewayId::generate());
 
     try {
         $port->create(replayCreateRequest($id));
@@ -77,7 +77,7 @@ it('says which payment it is refusing to place twice', function () {
 });
 
 it('places a payment it has never seen', function () {
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesPayments::class);
     $gateway->shouldReceive('authorize')->once()->andReturn(
         Techork\PaymentService\Gateway\Contract\AuthorizationResult::succeeded('ref_new'),
     );
@@ -86,7 +86,7 @@ it('places a payment it has never seen', function () {
     $txRepo->shouldReceive('findForPaymentIntent')->andReturnNull();
     $txRepo->shouldReceive('saveForPaymentIntent')->once();
 
-    $port = new OmnipayCreatePort($gateway, $txRepo, GatewayId::generate());
+    $port = new CreateAdapter($gateway, $txRepo, GatewayId::generate());
 
     expect($port->create(replayCreateRequest(PaymentIntentId::generate()))->challenge)->toBeNull();
 });

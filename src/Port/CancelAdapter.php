@@ -10,19 +10,20 @@ use Techork\PaymentService\Domain\PaymentIntent\Port\CancelPort;
 use Techork\PaymentService\Domain\PaymentIntent\Port\GatewayDeclinedException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\Request\CancelRequest;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
+use Techork\PaymentService\Gateway\Command\CancelCommand;
+use Techork\PaymentService\Gateway\Role\CancelsPayments;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 
 /**
- * {@see CancelPort} backed by {@see PaymentGatewayInterface}. Voids /
+ * {@see CancelPort} backed by {@see CancelsPayments}. Voids /
  * cancels a held authorization. Gateway refusal becomes a
  * {@see GatewayDeclinedException}; the aggregate's `cancel()` catches that
  * and records a `PaymentIntentFailed`, so it never reaches the caller.
  */
-final readonly class OmnipayCancelPort implements CancelPort
+final readonly class CancelAdapter implements CancelPort
 {
     public function __construct(
-        private PaymentGatewayInterface $gateway,
+        private CancelsPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
     ) {}
@@ -40,11 +41,11 @@ final readonly class OmnipayCancelPort implements CancelPort
         $transactionReference = $this->transactionRepository->findForPaymentIntent($paymentIntentId)
             ?? throw new RuntimeException("No gateway transaction reference recorded for payment intent '$paymentIntentId'.");
 
-        $result = $this->gateway->cancel(
-            $this->gatewayId,
-            $transactionReference,
-            "$paymentIntentId:cancel",
-        );
+        $result = $this->gateway->cancel(new CancelCommand(
+            gatewayId: $this->gatewayId,
+            transactionReference: $transactionReference,
+            clientUniqueId: "$paymentIntentId:cancel",
+        ));
 
         if (!$result->success) {
             throw new GatewayDeclinedException($result->message ?? 'Gateway declined the cancellation');

@@ -13,7 +13,8 @@ use Techork\PaymentService\Domain\PaymentIntent\Port\GatewayDeclinedException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\Request\CreateRequest;
 use Techork\PaymentService\Domain\PaymentIntent\ValueObject\PaymentIntentId;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
+use Techork\PaymentService\Gateway\Command\RebillingCommand;
+use Techork\PaymentService\Gateway\Role\PlacesRebillingPayments;
 use Techork\PaymentService\Gateway\Exception\UnsupportedOperation;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 
@@ -21,7 +22,7 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  * {@see CreatePort} for a payment that belongs to a rebilling series — a
  * subscription's first charge, or any of its renewals.
  *
- * The same interface as {@see OmnipayCreatePort} and a different implementation,
+ * The same interface as {@see CreateAdapter} and a different implementation,
  * which is the whole point: the SCENARIO is chosen by which one the caller is given,
  * not by a field the aggregate has to branch on. Nothing else can choose it. A
  * subscription opened by a present cardholder is cardholder-initiated with nothing
@@ -52,10 +53,10 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  * metadata instead, where the gateway layer records the reference of whichever
  * transaction OPENED the intent.
  */
-final readonly class OmnipayRebillingCreatePort implements CreatePort
+final readonly class RebillingCreateAdapter implements CreatePort
 {
     public function __construct(
-        private PaymentGatewayInterface $gateway,
+        private PlacesRebillingPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
         private ?PaymentIntentId $genesisPaymentIntentId,
@@ -93,16 +94,16 @@ final readonly class OmnipayRebillingCreatePort implements CreatePort
             ? null
             : $this->transactionRepository->findMetadataForPaymentIntent($this->genesisPaymentIntentId->toString())['opening_transaction_reference'] ?? null;
 
-        $result = $this->gateway->authorizeRebilling(
-            $this->gatewayId,
-            $request->instrument,
-            $request->amount,
-            $request->initiation,
-            $genesisReference,
-            $clientUniqueId,
-            $request->billingAddress,
-            $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
-        );
+        $result = $this->gateway->authorizeRebilling(new RebillingCommand(
+            gatewayId: $this->gatewayId,
+            instrument: $request->instrument,
+            amount: $request->amount,
+            initiation: $request->initiation,
+            genesisReference: $genesisReference,
+            clientUniqueId: $clientUniqueId,
+            billingAddress: $request->billingAddress,
+            threeDS: $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
+        ));
 
         if ($result->reference !== null) {
             $this->transactionRepository->saveForPaymentIntent($this->gatewayId, $clientUniqueId, $result->reference, $result->metadata);

@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace Techork\PaymentService\Laravel\Logger\Sanitizer;
 
-use Omnipay\Common\CreditCard;
-use Omnipay\Common\Helper;
 use Override;
 use Techork\PaymentService\Laravel\Logger\SanitizerInterface;
 
 /**
  * Detects PANs by strict shape: a 13–19 character run of pure digits that
- * passes Omnipay's Luhn check. Independent of the context key name, so card
+ * passes the Luhn check. Independent of the context key name, so card
  * numbers carried under arbitrary fields (`cardNumber`, `pan`, `number`, …)
  * are still caught — but only when the value itself is already digit-only,
  * which is how every gateway in this app ships them on the wire. Skipping
@@ -34,12 +32,31 @@ final readonly class CardNumberSanitizer implements SanitizerInterface
         return $length >= 13
             && $length <= 19
             && preg_match('/^\d+$/', $value) === 1
-            && Helper::validateLuhn($value);
+            && self::passesLuhn($value);
+    }
+
+    /**
+     * Doubling every second digit from the right and summing the digits of the products, which is
+     * what `Omnipay\Common\Helper::validateLuhn()` did before it went with the rest of Omnipay.
+     * Kept digit-for-digit: the sanitiser's whole contract is which strings it decides are cards,
+     * and a subtler check would either start masking references or stop masking PANs.
+     */
+    private static function passesLuhn(string $number): bool
+    {
+        $digits = '';
+
+        foreach (array_reverse(str_split($number)) as $position => $digit) {
+            $digits .= $position % 2 === 1 ? (string) ((int) $digit * 2) : $digit;
+        }
+
+        return (int) array_sum(array_map(intval(...), str_split($digits))) % 10 === 0;
     }
 
     #[Override]
     public function mask(string $name, mixed $value): string
     {
-        return new CreditCard(['number' => (string) $value])->getNumberMasked('*');
+        $number = (string) $value;
+
+        return str_repeat('*', max(strlen($number) - 4, 0)) . substr($number, -4);
     }
 }

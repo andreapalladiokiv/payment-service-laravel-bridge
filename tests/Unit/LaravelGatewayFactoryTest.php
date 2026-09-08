@@ -4,136 +4,143 @@ declare(strict_types=1);
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Foundation\Application;
-use Omnipay\Common\AbstractGateway;
-use Omnipay\Common\Message\RequestInterface;
+use Techork\PaymentService\Common\Contract\DecryptInterface;
+use Techork\PaymentService\Gateway\Command\CancelCommand;
+use Techork\PaymentService\Gateway\Command\PlacementCommand;
+use Techork\PaymentService\Gateway\Command\RebillingCommand;
+use Techork\PaymentService\Gateway\Command\CaptureCommand;
+use Techork\PaymentService\Gateway\Command\RefundCommand;
 use Techork\PaymentService\Gateway\Contract\CustomerRepository;
+use Techork\PaymentService\Gateway\Contract\AuthorizationResult;
+use Techork\PaymentService\Gateway\Contract\GatewayResult;
+use Techork\PaymentService\Gateway\ValueObject\GatewayInfrastructure;
 use Techork\PaymentService\Gateway\Contract\Gateway as GatewayContract;
 use Techork\PaymentService\Gateway\Contract\GatewayCredential;
+use Techork\PaymentService\Gateway\Contract\GatewayInstrumentRepository;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\LaravelGatewayFactory;
 use Techork\PaymentService\Laravel\Repository\EloquentCustomerRepository;
+use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
+use Techork\PaymentService\Gateway\Command\IssueCardCommand;
+use Techork\PaymentService\Gateway\Command\TerminateCardCommand;
+use Techork\PaymentService\Gateway\Command\UpdateCardCommand;
+use Techork\PaymentService\Gateway\Command\VaultCommand;
+use Techork\PaymentService\Gateway\Contract\RegistrationResult;
+use Techork\PaymentService\Gateway\Contract\VirtualCardResult;
 
 /**
  * The only thing this factory adds to its parent is a merge, and the merge is a security
- * boundary: `services.{gateway_name}` — derived from APP_ENV, identical for every tenant —
- * has to beat whatever the tenant's credentials JSON says, so a stored
- * `environment=production` cannot open a live gateway from a dev build.
+ * boundary: `services.{gateway_name}` — derived from APP_ENV, identical for every tenant — has to
+ * beat whatever the tenant's credentials JSON says, so a stored `environment=production` cannot
+ * open a live gateway from a dev build.
  *
- * Pinning the parameter bag alone would not be enough, and that is why this file exists.
- * Providers bake environment-dependent state at initialize() time — ConnexPay builds both
- * of its HTTP clients, base URL included, inside its initialize() override — and the
- * parent factory has already called initialize() with the credentials by the time the
- * defaults are applied. Set a parameter afterwards and the bag says "sandbox" while the
- * client that was already built keeps talking to production. So every assertion below
- * checks the value the gateway BAKED, not only the value it stores.
+ * Pinning the merged settings alone would not be enough, and that is why this file still exists.
+ * Providers derive state from the environment when they are configured — ConnexPay builds both of
+ * its HTTP clients, base URL included — so what matters is the value the gateway BAKED, not the
+ * one it stored.
  *
- * {@see LaravelGatewayFactoryProbeGateway} exists to make that baking observable: it is
- * shaped after ConnexPayGateway (default parameters, `set*` accessors, an initialize()
- * override that derives a base URL) rather than mocked, because a double would answer for
- * the merge and say nothing about the freeze that motivated the re-initialisation. It lives
- * here rather than importing a provider package, which the Laravel bridge does not depend on.
- *
- * Deliberately written against the factory's OBSERVABLE result — final parameters, final
- * baked URL, gateway identity — and not against how many times initialize() is called or
- * in what order the defaults are applied. Replacing the per-key `setParameter` loop plus
- * re-initialise with a single `initialize()` of an explicit merge has to keep every
- * assertion here true.
+ * What is gone with the parameter bag: the merge used to happen AFTER the gateway had been
+ * initialised from credentials, so anything baked from the tenant's environment was stale and had
+ * to be rebuilt by re-initialising. The settings are merged before `configure()` is called, once,
+ * and there is no window in which a client and its configuration disagree.
  */
-final class LaravelGatewayFactoryProbeGateway extends AbstractGateway implements GatewayContract
+final class LaravelGatewayFactoryProbeGateway implements GatewayContract
 {
-    /**
-     * Derived inside initialize() from the environment parameter, exactly as ConnexPay's
-     * clients derive their base URL — the state a later setParameter() cannot reach.
-     */
+    /** Derived in configure(), exactly as ConnexPay's clients derive their base URL. */
     public string $bakedBaseUrl = '';
 
     public ?CustomerRepository $attachedRepository = null;
+
+    public ?GatewayInfrastructure $attachedInfrastructure = null;
 
     public function getName(): string
     {
         return 'probe_provider';
     }
 
-    /** @return array<string, string> */
-    public function getDefaultParameters(): array
+    public function configure(GatewayInfrastructure $infrastructure): void
     {
-        return ['username' => '', 'environment' => 'sandbox', 'deviceGuid' => ''];
+        $this->attachedInfrastructure = $infrastructure;
+        $this->attachedRepository = $infrastructure->customers;
+
+        $this->bakedBaseUrl = $infrastructure->stringSetting('environment', 'sandbox') === 'production'
+            ? 'https://live.probe.test'
+            : 'https://sandbox.probe.test';
     }
 
     public function getEnvironment(): string
     {
-        return $this->getParameter('environment') ?? 'sandbox';
-    }
-
-    public function setEnvironment(string $value): static
-    {
-        return $this->setParameter('environment', $value);
+        return $this->attachedInfrastructure?->stringSetting('environment', 'sandbox') ?? 'sandbox';
     }
 
     public function getUsername(): string
     {
-        return $this->getParameter('username') ?? '';
-    }
-
-    public function setUsername(string $value): static
-    {
-        return $this->setParameter('username', $value);
+        return $this->attachedInfrastructure?->stringSetting('username') ?? '';
     }
 
     public function getDeviceGuid(): string
     {
-        return $this->getParameter('deviceGuid') ?? '';
+        return $this->attachedInfrastructure?->stringSetting('deviceGuid') ?? '';
     }
 
-    public function setDeviceGuid(string $value): static
+    public function authorize(PlacementCommand $command): AuthorizationResult
     {
-        return $this->setParameter('deviceGuid', $value);
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function initialize(array $parameters = []): static
+    public function charge(PlacementCommand $command): AuthorizationResult
     {
-        parent::initialize($parameters);
-
-        $this->bakedBaseUrl = $this->getEnvironment() === 'production'
-            ? 'https://live.probe.test'
-            : 'https://sandbox.probe.test';
-
-        return $this;
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function setCustomerRepository(CustomerRepository $repository): void
+    public function authorizeRebilling(RebillingCommand $command): AuthorizationResult
     {
-        $this->attachedRepository = $repository;
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function createPaymentMethod(array $options = []): RequestInterface
+    public function capture(CaptureCommand $command): GatewayResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function void(array $options = []): RequestInterface
+    public function cancel(CancelCommand $command): GatewayResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function issueVirtualCard(array $options = []): RequestInterface
+    public function refund(RefundCommand $command): GatewayResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function terminateVirtualCard(array $options = []): RequestInterface
+    public function retryRefund(RefundCommand $command): GatewayResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function retryRefund(array $options = []): RequestInterface
+    public function tokenize(VaultCommand $command): RegistrationResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 
-    public function updateVirtualCard(array $options = []): RequestInterface
+    public function registerPaymentMethod(VaultCommand $command): RegistrationResult
     {
-        throw new BadMethodCallException('The factory never reaches a request.');
+        throw new BadMethodCallException('The factory never reaches an operation.');
+    }
+
+    public function issueVirtualCard(IssueCardCommand $command): VirtualCardResult
+    {
+        throw new BadMethodCallException('The factory never reaches an operation.');
+    }
+
+    public function updateVirtualCard(UpdateCardCommand $command): VirtualCardResult
+    {
+        throw new BadMethodCallException('The factory never reaches an operation.');
+    }
+
+    public function terminateVirtualCard(TerminateCardCommand $command): GatewayResult
+    {
+        throw new BadMethodCallException('The factory never reaches an operation.');
     }
 }
 
@@ -191,7 +198,12 @@ function laravelGatewayFactoryUnderTest(array $config, array $names = []): Larav
 
     // The real repository, not a double: the factory hands it to the gateway and nothing
     // here calls it, so there is no behaviour to fake and an identity worth asserting.
-    $factory = new LaravelGatewayFactory(new EloquentCustomerRepository, new ConfigRepository(['services' => $config]));
+    $factory = new LaravelGatewayFactory(
+        new EloquentCustomerRepository,
+        Mockery::mock(DecryptInterface::class),
+        Mockery::mock(GatewayInstrumentRepository::class, ['find' => null]),
+        new ConfigRepository(['services' => $config]),
+    );
     $factory->replace($registry);
 
     return $factory;
@@ -309,6 +321,8 @@ it('still holds the customer repository the parent attached after re-initialisin
     $repository = new EloquentCustomerRepository;
     $factory = new LaravelGatewayFactory(
         $repository,
+        Mockery::mock(DecryptInterface::class),
+        Mockery::mock(GatewayInstrumentRepository::class, ['find' => null]),
         new ConfigRepository(['services' => ['probe_provider' => ['environment' => 'sandbox']]]),
     );
     $factory->replace(['probe_provider' => LaravelGatewayFactoryProbeGateway::class]);
@@ -345,6 +359,12 @@ it('is resolvable by the container, which is how the service provider builds it'
     $app = new Application(sys_get_temp_dir());
     $app->instance('config', new ConfigRepository(['services' => []]));
     $app->bind(CustomerRepository::class, EloquentCustomerRepository::class);
+    // The repository is bound to the concrete the service provider names. The decrypter is not:
+    // `LaravelEncrypter` wants the framework's `encrypter` service, which a bare Application has
+    // no reason to boot. What is under test is that the container can READ the constructor, and a
+    // bound interface answers that either way.
+    $app->bind(GatewayInstrumentRepository::class, EloquentGatewayInstrumentRepository::class);
+    $app->instance(DecryptInterface::class, Mockery::mock(DecryptInterface::class));
 
     expect($app->make(LaravelGatewayFactory::class))->toBeInstanceOf(LaravelGatewayFactory::class);
 });

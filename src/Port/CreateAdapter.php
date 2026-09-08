@@ -12,20 +12,21 @@ use Techork\PaymentService\Domain\PaymentIntent\Port\CreatePort;
 use Techork\PaymentService\Domain\PaymentIntent\Port\GatewayDeclinedException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\Request\CreateRequest;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
+use Techork\PaymentService\Gateway\Command\PlacementCommand;
+use Techork\PaymentService\Gateway\Role\PlacesPayments;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 
 /**
- * {@see CreatePort} backed by {@see PaymentGatewayInterface} (Omnipay-style
+ * {@see CreatePort} backed by {@see PlacesPayments} (Omnipay-style
  * router). Selects `charge()` for Immediate captureMethod, `authorize()`
  * otherwise. Persists the gateway reference so subsequent capture / cancel /
  * refund can locate the transaction. Translates a non-success result into
  * {@see GatewayDeclinedException} so the aggregate records `PaymentIntentFailed`.
  */
-final readonly class OmnipayCreatePort implements CreatePort
+final readonly class CreateAdapter implements CreatePort
 {
     public function __construct(
-        private PaymentGatewayInterface $gateway,
+        private PlacesPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
     ) {}
@@ -45,11 +46,22 @@ final readonly class OmnipayCreatePort implements CreatePort
             throw PaymentAlreadyPlaced::withReference($clientUniqueId, $placed);
         }
 
-        $threeDS = $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null;
+        $command = new PlacementCommand(
+            gatewayId: $this->gatewayId,
+            instrument: $request->instrument,
+            amount: $request->amount,
+            clientUniqueId: $clientUniqueId,
+            billingAddress: $request->billingAddress,
+            threeDS: $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
+            initiation: $request->initiation,
+        );
 
+        // The capture method stays a choice of operation rather than a field on the command,
+        // because the two are separately refusable: Paynet charges on its hosted page and has no
+        // authorization step to offer.
         $result = $request->captureMethod === CaptureMethod::Immediate
-            ? $this->gateway->charge($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation)
-            : $this->gateway->authorize($this->gatewayId, $request->instrument, $request->amount, $clientUniqueId, $request->billingAddress, $threeDS, initiation: $request->initiation);
+            ? $this->gateway->charge($command)
+            : $this->gateway->authorize($command);
 
         if ($result->reference !== null) {
             $this->transactionRepository->saveForPaymentIntent($this->gatewayId, $clientUniqueId, $result->reference, $result->metadata);

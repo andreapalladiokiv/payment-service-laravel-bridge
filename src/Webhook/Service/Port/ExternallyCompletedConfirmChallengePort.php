@@ -26,7 +26,7 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
  * wrote them. Now the announced data arrives in the constructor and the port hands it
  * over when the domain asks, persisting the reference itself, before the aggregate
  * records anything, exactly as
- * {@see \Techork\PaymentService\Laravel\Port\OmnipayCreatePort} does inline.
+ * {@see \Techork\PaymentService\Laravel\Port\CreateAdapter} does inline.
  *
  * Its counterpart is
  * {@see \Techork\PaymentService\Laravel\Port\OmnipayConfirmChallengePort}, for the

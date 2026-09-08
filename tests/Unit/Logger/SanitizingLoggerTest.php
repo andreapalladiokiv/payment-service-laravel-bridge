@@ -11,7 +11,7 @@ use Techork\PaymentService\Laravel\Logger\Sanitizer\PhoneNumberSanitizer;
 use Techork\PaymentService\Laravel\Logger\SanitizingLogger;
 
 /**
- * Field list derives from what `LoggingPaymentGatewayRouter` actually emits
+ * Field list derives from what `Loggingthe gateway stack actually emits
  * — i.e. `PaymentInstrument::toPayload()`, `BillingAddress::toArray()`, and
  * the `VirtualCardResult` shape it summarises. This is the gateway-layer
  * contract, not the legacy Nuvei HTTP wire format.

@@ -13,21 +13,21 @@ use Techork\PaymentService\Domain\PaymentIntent\Port\Request\CreateRequest;
 use Techork\PaymentService\Domain\PaymentIntent\ValueObject\PaymentIntentId;
 use Techork\PaymentService\Gateway\Contract\AuthorizationResult;
 use Techork\PaymentService\Gateway\Contract\GatewayTransactionRepository;
-use Techork\PaymentService\Gateway\Contract\PaymentGatewayInterface;
 use Techork\PaymentService\Gateway\Exception\UnsupportedByGateway;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
-use Techork\PaymentService\Laravel\Port\OmnipayRebillingCreatePort;
+use Techork\PaymentService\Laravel\Port\RebillingCreateAdapter;
+use Techork\PaymentService\Gateway\Role\PlacesRebillingPayments;
 
 /**
  * The genesis is held by the PORT, not carried in the request: the caller builds this
- * port per payment (`new OmnipayRebillingCreatePort(...)` at the call site, never
+ * port per payment (`new RebillingCreateAdapter(...)` at the call site, never
  * resolved from a container), and it is the only party that knows the series. So the
  * domain contract stays untouched.
  *
  * Nullable but not optional — opening a series is stated by passing null, so no
  * caller can mean it by leaving an argument out.
  *
- * The same CreatePort interface as OmnipayCreatePort, a different implementation.
+ * The same CreatePort interface as CreateAdapter, a different implementation.
  * Which one the caller is given IS the scenario: nothing in the request separates a
  * subscription's first charge from a standalone checkout, since both are
  * cardholder-initiated with nothing before them.
@@ -46,12 +46,12 @@ function seriesRequest(
     );
 }
 
-/** @return array{0: OmnipayRebillingCreatePort, 1: callable(): array} */
+/** @return array{0: RebillingCreateAdapter, 1: callable(): array} */
 function seriesPort(?string $storedReference, ?PaymentIntentId $genesis): array
 {
     $seen = [];
 
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesRebillingPayments::class);
     $gateway->shouldReceive('authorizeRebilling')->once()
         ->andReturnUsing(function (...$args) use (&$seen) {
             $seen = $args;
@@ -78,7 +78,7 @@ function seriesPort(?string $storedReference, ?PaymentIntentId $genesis): array
     }
 
     return [
-        new OmnipayRebillingCreatePort($gateway, $txRepo, GatewayId::generate(), $genesis),
+        new RebillingCreateAdapter($gateway, $txRepo, GatewayId::generate(), $genesis),
         // A regular closure, not an arrow fn: those capture by value.
         static function () use (&$seen): array { return $seen; },
     ];
@@ -89,9 +89,10 @@ it('resolves the genesis payment intent to the reference the acquirer wants', fu
 
     $port->create(seriesRequest());
 
-    // (gatewayId, instrument, amount, initiation, genesisReference, ...)
-    expect($seen()[4])->toBe('1110000000123456')
-        ->and($seen()[3])->toBe(PaymentInitiation::MerchantRecurring);
+    // Named fields on one command, where this used to index into eight positional arguments and
+    // needed a comment above it saying which was which.
+    expect($seen()[0]->genesisReference)->toBe('1110000000123456')
+        ->and($seen()[0]->initiation)->toBe(PaymentInitiation::MerchantRecurring);
 });
 
 it('asks for no reference when null was passed to say this payment opens the series', function (PaymentInitiation $initiation) {
@@ -102,7 +103,7 @@ it('asks for no reference when null was passed to say this payment opens the ser
 
     $port->create(seriesRequest($initiation));
 
-    expect($seen()[4])->toBeNull();
+    expect($seen()[0]->genesisReference)->toBeNull();
 })->with([
     PaymentInitiation::CardholderInitiated,
     PaymentInitiation::MerchantUnscheduled,
@@ -116,7 +117,7 @@ it('passes nothing rather than the settle id, when no opening reference was reco
 
     $port->create(seriesRequest());
 
-    expect($seen()[4])->toBeNull();
+    expect($seen()[0]->genesisReference)->toBeNull();
 });
 
 it('refuses Immediate capture as a wiring error, not as a decline', function () {
@@ -124,12 +125,12 @@ it('refuses Immediate capture as a wiring error, not as a decline', function () 
     // split is what makes "one payment intent activates at most one subscription"
     // true. Immediate would record Charged and fail that check — after the acquirer
     // had already taken the money.
-    $gateway = Mockery::mock(PaymentGatewayInterface::class);
+    $gateway = Mockery::mock(PlacesRebillingPayments::class);
     $gateway->shouldReceive('authorizeRebilling')->never();
 
     $txRepo = Mockery::mock(GatewayTransactionRepository::class);
 
-    $port = new OmnipayRebillingCreatePort($gateway, $txRepo, GatewayId::generate(), null);
+    $port = new RebillingCreateAdapter($gateway, $txRepo, GatewayId::generate(), null);
 
     $thrown = null;
 
