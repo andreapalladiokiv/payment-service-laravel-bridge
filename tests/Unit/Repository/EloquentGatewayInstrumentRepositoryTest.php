@@ -20,7 +20,6 @@ use Techork\PaymentService\Common\ValueObject\Token;
 use Techork\PaymentService\Common\ValueObject\TokenId;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
-use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 use Techork\PaymentService\Common\ValueObject\CustomerId;
 
 /**
@@ -104,14 +103,15 @@ function instrumentTestPaymentMethod(?string $id = null): PaymentMethod
 }
 
 /**
- * The same credential with a customer attached, which is the form a payment now carries: a bare
- * `PaymentMethod` names no payer and the gateways decline it.
+ * The same card, claimed — which is a state of a payment method rather than a second type, so it
+ * is the same class with one more constructor argument.
  */
-function instrumentTestAttached(PaymentMethod $paymentMethod, ?string $customerId = null): AttachedPaymentMethod
+function instrumentTestClaimed(PaymentMethod $paymentMethod, ?string $customerId = null): PaymentMethod
 {
-    return new AttachedPaymentMethod(
+    return new PaymentMethod(
+        $paymentMethod->id,
+        $paymentMethod->instrument,
         laravelSuiteCustomer(id: CustomerId::fromString($customerId ?? '01920000-0000-7000-8000-00000000cafe')),
-        $paymentMethod,
     );
 }
 
@@ -261,41 +261,44 @@ it('refuses to store a reference for an instrument with no identity, and writes 
 });
 
 // ─────────────────────────────────────────────────────────
-//  One credential, one key — whichever form it arrives in
+//  One credential, one key — claimed or not
 //
-//  A row is addressed by (gateway_id, referenceable_type, referenceable_id), and the two halves
-//  used to come from two different views of the same instrument: the id through `resolveId()`,
-//  which is a visitor and unwrapped a pairing, and the type through `$instrument::type()`, which
-//  did not. So one stored card was addressed as ('payment_method', <id>) or
-//  ('attached_payment_method', <the same id>) depending on how it was passed — the id half being
-//  identical is what made it a collision of meaning rather than two unrelated rows.
+//  These were written against a defect and outlived it, which is why they stay. A row is
+//  addressed by (gateway_id, referenceable_type, referenceable_id), and there was a window in
+//  which the two halves came from two different views of the same credential: the id through
+//  `resolveId()`, a visitor that unwrapped an `AttachedPaymentMethod` pairing, and the type
+//  through `$instrument::type()`, which answered `attached_payment_method`. So one card was
+//  addressed as ('payment_method', <id>) or ('attached_payment_method', <the same id>) depending
+//  on how it was passed, registration wrote one and a payment read the other, and the reference
+//  was invisible exactly when it was needed.
 //
-//  It was reachable on the ordinary path, in the direction that matters: registration writes the
-//  bare form, a payment carries the attached one, so the reference was invisible exactly when it
-//  was needed and the payment failed as "not registered" — a key mismatch reading as a refusal.
+//  Attached is a state now, so one credential has one class and one `type()` and the split cannot
+//  be written. What these assert is the property that made the defect a defect — a reference is
+//  keyed on the card, not on who holds it — which is worth holding whether or not the shape that
+//  broke it could come back.
 // ─────────────────────────────────────────────────────────
 
-it('finds a reference saved in the bare form when asked in the attached form', function () {
+it('finds a reference saved before the card was claimed', function () {
     $paymentMethod = instrumentTestPaymentMethod();
 
     $this->repo->saveReference($this->gatewayId, $paymentMethod, 'pm_ref');
 
-    expect($this->repo->find($this->gatewayId, instrumentTestAttached($paymentMethod)))->toBe('pm_ref');
+    expect($this->repo->find($this->gatewayId, instrumentTestClaimed($paymentMethod)))->toBe('pm_ref');
 });
 
-it('finds a reference saved in the attached form when asked in the bare form', function () {
+it('finds a reference saved after the card was claimed, asked as the bare card', function () {
     $paymentMethod = instrumentTestPaymentMethod();
 
-    $this->repo->saveReference($this->gatewayId, instrumentTestAttached($paymentMethod), 'pm_ref');
+    $this->repo->saveReference($this->gatewayId, instrumentTestClaimed($paymentMethod), 'pm_ref');
 
     expect($this->repo->find($this->gatewayId, $paymentMethod))->toBe('pm_ref');
 });
 
-it('writes one row whichever form the same credential arrives in', function () {
+it('writes one row whether the card arrives claimed or not', function () {
     $paymentMethod = instrumentTestPaymentMethod();
 
     $this->repo->saveReference($this->gatewayId, $paymentMethod, 'pm_first');
-    $this->repo->saveReference($this->gatewayId, instrumentTestAttached($paymentMethod), 'pm_second');
+    $this->repo->saveReference($this->gatewayId, instrumentTestClaimed($paymentMethod), 'pm_second');
 
     expect(Capsule::table('gateway_references')->count())->toBe(1)
         ->and(instrumentReferenceRow($paymentMethod->id->toString())['reference'])->toBe('pm_second')
@@ -303,30 +306,29 @@ it('writes one row whichever form the same credential arrives in', function () {
 });
 
 /**
- * The property `visitAttachedPaymentMethod()`'s docblock claims: a reference belongs to the
- * instrument, not to whoever holds it, because a card can be attached and re-attached while its
- * provider-side reference stays what it was. Asserted rather than described, because the code
- * three lines below that docblock used to defeat it.
+ * A reference belongs to the instrument, not to whoever holds it: a card can be claimed and
+ * re-claimed while its provider-side reference stays what it was. Asserted rather than described,
+ * because a docblock said exactly this while the code three lines below it defeated the claim.
  */
 it('keys a reference on the credential, not on the customer holding it', function () {
     $paymentMethod = instrumentTestPaymentMethod();
 
     $this->repo->saveReference(
         $this->gatewayId,
-        instrumentTestAttached($paymentMethod, '01920000-0000-7000-8000-00000000aaaa'),
+        instrumentTestClaimed($paymentMethod, '01920000-0000-7000-8000-00000000aaaa'),
         'pm_ref',
     );
 
-    $reattached = instrumentTestAttached($paymentMethod, '01920000-0000-7000-8000-00000000bbbb');
+    $reattached = instrumentTestClaimed($paymentMethod, '01920000-0000-7000-8000-00000000bbbb');
 
     expect($this->repo->find($this->gatewayId, $reattached))->toBe('pm_ref')
         ->and(Capsule::table('gateway_references')->count())->toBe(1);
 });
 
-it('records a failure in the attached form that is readable in the bare form', function () {
+it('records a failure against a claimed card that is readable from the bare one', function () {
     $paymentMethod = instrumentTestPaymentMethod();
 
-    $this->repo->saveFailure($this->gatewayId, instrumentTestAttached($paymentMethod), 'card declined');
+    $this->repo->saveFailure($this->gatewayId, instrumentTestClaimed($paymentMethod), 'card declined');
 
     $row = instrumentReferenceRow($paymentMethod->id->toString());
 
@@ -340,11 +342,11 @@ it('records a failure in the attached form that is readable in the bare form', f
  * apart — that is what the type half of the key is for — so collapsing the attached form onto the
  * bare one must not collapse anything else with it.
  */
-it('still keeps different instrument kinds apart after unwrapping', function () {
+it('still keeps different instrument kinds apart', function () {
     $shared = Uuid::uuid4()->toString();
 
     $this->repo->saveReference($this->gatewayId, instrumentTestToken($shared), 'tok_ref');
-    $this->repo->saveReference($this->gatewayId, instrumentTestAttached(instrumentTestPaymentMethod($shared)), 'pm_ref');
+    $this->repo->saveReference($this->gatewayId, instrumentTestClaimed(instrumentTestPaymentMethod($shared)), 'pm_ref');
 
     expect($this->repo->find($this->gatewayId, instrumentTestToken($shared)))->toBe('tok_ref')
         ->and($this->repo->find($this->gatewayId, instrumentTestPaymentMethod($shared)))->toBe('pm_ref')

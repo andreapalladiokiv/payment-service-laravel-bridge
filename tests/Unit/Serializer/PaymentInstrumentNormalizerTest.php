@@ -41,7 +41,6 @@ use Techork\PaymentService\Laravel\Serializer\PiiAttributeLoader;
 use Techork\PaymentService\Laravel\Serializer\PiiAwareObjectNormalizer;
 use Techork\PaymentService\Laravel\Serializer\UuidNormalizer;
 use Techork\PaymentService\Laravel\Shredding\PiiStore;
-use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 
 /**
  * Records what the PII pipeline wrote so the instrument tests can prove the
@@ -349,9 +348,10 @@ it('shreds the attached customer independently of the card', function () {
     // on two objects a payment carries — still independently erasable, still reached differently.
     $store = new InstrumentNormalizerTestStore;
     $serializer = instrumentNormalizerSerializer($store);
-    $payload = $serializer->normalize(new AttachedPaymentMethod(
+    $payload = $serializer->normalize(new PaymentMethod(
+        PaymentMethodId::generate(),
+        instrumentNormalizerCard(),
         laravelSuiteCustomer(firstName: 'John', lastName: 'Public'),
-        new PaymentMethod(PaymentMethodId::generate(), instrumentNormalizerCard()),
     ));
 
     $store->forget($payload['customer']['identity']['firstName']);
@@ -359,7 +359,7 @@ it('shreds the attached customer independently of the card', function () {
 
     expect($rebuilt->customer->identity->firstName)->toBe(ShreddingStubs::NAME)
         ->and($rebuilt->customer->identity->lastName)->toBe('Public')
-        ->and((string) $rebuilt->paymentMethod->instrument->holder)->toBe('JOHN Q PUBLIC');
+        ->and((string) $rebuilt->instrument->holder)->toBe('JOHN Q PUBLIC');
 });
 
 // ─────────────────────────────────────────────────────────
@@ -486,16 +486,18 @@ it('reads back a state written in the shape the reflection normalizer used to pr
     expect($rebuilt->address?->state)->toEqual(new State('AK', new Country('US')));
 });
 
-it('round-trips an attached payment method whose billing address carries a state', function () {
+it('round-trips a claimed payment method whose billing address carries a state', function () {
     // The same path through the other address VO, kept separate because BillingAddress is the
     // one every non-imported intent carries — so this is the reach of the defect, not a
     // variation on it.
     //
-    // Through an `AttachedPaymentMethod` because that is where an address reaches an instrument
-    // now: a bare `PaymentMethod` holds none, and the customer inside this one is also what puts
-    // a customer id on the graph, which is one more `UuidValueObject` for the chain to carry.
+    // Through a CLAIMED payment method because that is where an address reaches an instrument
+    // now: an unclaimed one holds none, and the customer on this one is also what puts a customer
+    // id on the graph, which is one more `UuidValueObject` for the chain to carry.
     $serializer = instrumentNormalizerSerializer();
-    $original = new AttachedPaymentMethod(
+    $original = new PaymentMethod(
+        PaymentMethodId::generate(),
+        instrumentNormalizerCard(),
         laravelSuiteCustomer(address: new BillingAddress(
             line: '1 Analytical Way',
             city: 'Juneau',
@@ -503,7 +505,6 @@ it('round-trips an attached payment method whose billing address carries a state
             postalCode: '99801',
             state: new State('AK', new Country('US')),
         )),
-        new PaymentMethod(PaymentMethodId::generate(), instrumentNormalizerCard()),
     );
 
     $payload = $serializer->normalize($original);

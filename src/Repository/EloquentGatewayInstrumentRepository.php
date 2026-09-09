@@ -11,7 +11,6 @@ use Techork\PaymentService\Common\Contract\PaymentInstrumentVisitor;
 use Techork\PaymentService\Common\ValueObject\Cash;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
-use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethodId;
 use Techork\PaymentService\Common\ValueObject\Token;
@@ -33,7 +32,6 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     #[Override]
     public function find(GatewayId $gatewayId, PaymentInstrument $instrument): ?string
     {
-        $instrument = $this->addressable($instrument);
         $id = $this->resolveId($instrument);
 
         if ($id === null) {
@@ -50,7 +48,6 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     #[Override]
     public function saveReference(GatewayId $gatewayId, PaymentInstrument $instrument, string $reference): void
     {
-        $instrument = $this->addressable($instrument);
         $id = $this->resolveId($instrument);
 
         // Refused, where find() legitimately answers null. A raw card or cash has no identity
@@ -79,7 +76,6 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     #[Override]
     public function saveFailure(GatewayId $gatewayId, PaymentInstrument $instrument, string $reason): void
     {
-        $instrument = $this->addressable($instrument);
         $id = $this->resolveId($instrument);
 
         // Refused, where find() legitimately answers null. A raw card or cash has no identity
@@ -105,39 +101,24 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     }
 
     /**
-     * The instrument a row is actually keyed on, unwrapped once so both halves of the key agree.
+     * Both halves of the row's key come off one instrument, which is now true by construction.
      *
-     * A row is addressed by `(gateway_id, referenceable_type, referenceable_id)`, and the two
-     * halves used to be read off two different views of the same instrument: the id through
-     * {@see resolveId()}, which is a visitor and unwraps a pairing, and the type through
-     * `$instrument::type()`, which does not. So one stored credential was addressed as
+     * A row is addressed by `(gateway_id, referenceable_type, referenceable_id)`, and there was a
+     * window in which those halves were read off two different views of the same credential: the
+     * id through {@see resolveId()}, a visitor that unwrapped an `AttachedPaymentMethod` pairing
+     * to the card inside, and the type through `$instrument::type()`, which answered
+     * `attached_payment_method`. One stored card was therefore addressed as
      * `('payment_method', <id>)` or `('attached_payment_method', <the same id>)` depending on
-     * which form the caller happened to hold — and the id half being identical is what made that
-     * a collision of meaning rather than two unrelated rows.
+     * which form a caller held — the id half being identical is what made that a collision of
+     * meaning rather than two unrelated rows, and the upsert's conflict target includes the type,
+     * so the duplicate was written silently.
      *
-     * It was reachable on the ordinary path and in the direction that hurts: registration writes
-     * the bare form, while a payment carries the attached one because the gateways decline an
-     * instrument that names no payer. The reference was therefore invisible at exactly the moment
-     * it was needed, and the payment failed as "not registered" — a key mismatch reading as a
-     * gateway's refusal. `saveFailure()` wrote the reason against a key nothing would read, and
-     * the upsert's conflict target includes the type, so the duplicate was written silently.
-     *
-     * Unwrapping HERE rather than teaching the visitor a `resolveType()` is the smaller fix and
-     * the stronger one: `type()` is static and cannot be dispatched through a visit, so the
-     * alternative leaves two methods that have to agree. One view in, both halves derived from
-     * it, and "a reference is keyed on the credential" holds by construction.
-     *
-     * Which customer holds the credential is a separate map — `GatewayCustomerRepository` — for
-     * the reason {@see visitAttachedPaymentMethod()} gives: a card can be attached and
-     * re-attached while its provider-side reference stays what it was.
+     * That was patched here with an unwrap-at-the-boundary helper, and then removed by the shape:
+     * attached is a STATE of a {@see PaymentMethod} rather than a second type, so one credential
+     * has one class, one `type()` and one id whether anybody has claimed it or not. Attaching a
+     * card cannot move the key its reference is stored under, which is the property this class
+     * needs and which no longer depends on two methods agreeing.
      */
-    private function addressable(PaymentInstrument $instrument): PaymentInstrument
-    {
-        return $instrument instanceof AttachedPaymentMethod
-            ? $instrument->paymentMethod
-            : $instrument;
-    }
-
     private function resolveId(PaymentInstrument $instrument): ?UuidValueObject
     {
         return $instrument->accept($this);
@@ -165,26 +146,6 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     public function visitPaymentMethod(PaymentMethod $paymentMethod): PaymentMethodId
     {
         return $paymentMethod->id;
-    }
-
-    /**
-     * The same id: a reference belongs to the instrument, not to whoever holds it.
-     *
-     * Which customer a card is attached to is a separate map — `GatewayCustomerRepository` —
-     * because one instrument can be attached and re-attached while its provider-side reference
-     * stays what it was.
-     *
-     * Unreachable from this class's three public methods, which run {@see addressable()} first
-     * and so never dispatch a pairing. Kept because the visitor contract requires the case and
-     * because the answer is right: it is the same rule, stated where a reader looking for the
-     * unwrapping expects to find it. What it could not do alone is fix the key — the type half
-     * comes from a static `type()` that no visit passes through, which is the whole reason
-     * `addressable()` exists.
-     */
-    #[Override]
-    public function visitAttachedPaymentMethod(AttachedPaymentMethod $attached): PaymentMethodId
-    {
-        return $attached->paymentMethod->id;
     }
 
     #[Override]
