@@ -20,6 +20,8 @@ use Techork\PaymentService\Common\ValueObject\Token;
 use Techork\PaymentService\Common\ValueObject\TokenId;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayInstrumentRepository;
+use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
+use Techork\PaymentService\Common\ValueObject\CustomerId;
 
 /**
  * The instrument half of `gateway_references`, at zero coverage until now: every provider
@@ -98,6 +100,18 @@ function instrumentTestPaymentMethod(?string $id = null): PaymentMethod
     return new PaymentMethod(
         PaymentMethodId::fromString($id ?? Uuid::uuid4()->toString()),
         instrumentTestCard(),
+    );
+}
+
+/**
+ * The same credential with a customer attached, which is the form a payment now carries: a bare
+ * `PaymentMethod` names no payer and the gateways decline it.
+ */
+function instrumentTestAttached(PaymentMethod $paymentMethod, ?string $customerId = null): AttachedPaymentMethod
+{
+    return new AttachedPaymentMethod(
+        laravelSuiteCustomer(id: CustomerId::fromString($customerId ?? '01920000-0000-7000-8000-00000000cafe')),
+        $paymentMethod,
     );
 }
 
@@ -244,4 +258,95 @@ it('refuses to store a reference for an instrument with no identity, and writes 
         ->and(fn () => $this->repo->saveFailure($this->gatewayId, new Cash, 'declined'))
         ->toThrow(RuntimeException::class, 'tokenise it first')
         ->and(Capsule::table('gateway_references')->count())->toBe(0);
+});
+
+// ─────────────────────────────────────────────────────────
+//  One credential, one key — whichever form it arrives in
+//
+//  A row is addressed by (gateway_id, referenceable_type, referenceable_id), and the two halves
+//  used to come from two different views of the same instrument: the id through `resolveId()`,
+//  which is a visitor and unwrapped a pairing, and the type through `$instrument::type()`, which
+//  did not. So one stored card was addressed as ('payment_method', <id>) or
+//  ('attached_payment_method', <the same id>) depending on how it was passed — the id half being
+//  identical is what made it a collision of meaning rather than two unrelated rows.
+//
+//  It was reachable on the ordinary path, in the direction that matters: registration writes the
+//  bare form, a payment carries the attached one, so the reference was invisible exactly when it
+//  was needed and the payment failed as "not registered" — a key mismatch reading as a refusal.
+// ─────────────────────────────────────────────────────────
+
+it('finds a reference saved in the bare form when asked in the attached form', function () {
+    $paymentMethod = instrumentTestPaymentMethod();
+
+    $this->repo->saveReference($this->gatewayId, $paymentMethod, 'pm_ref');
+
+    expect($this->repo->find($this->gatewayId, instrumentTestAttached($paymentMethod)))->toBe('pm_ref');
+});
+
+it('finds a reference saved in the attached form when asked in the bare form', function () {
+    $paymentMethod = instrumentTestPaymentMethod();
+
+    $this->repo->saveReference($this->gatewayId, instrumentTestAttached($paymentMethod), 'pm_ref');
+
+    expect($this->repo->find($this->gatewayId, $paymentMethod))->toBe('pm_ref');
+});
+
+it('writes one row whichever form the same credential arrives in', function () {
+    $paymentMethod = instrumentTestPaymentMethod();
+
+    $this->repo->saveReference($this->gatewayId, $paymentMethod, 'pm_first');
+    $this->repo->saveReference($this->gatewayId, instrumentTestAttached($paymentMethod), 'pm_second');
+
+    expect(Capsule::table('gateway_references')->count())->toBe(1)
+        ->and(instrumentReferenceRow($paymentMethod->id->toString())['reference'])->toBe('pm_second')
+        ->and(instrumentReferenceRow($paymentMethod->id->toString())['referenceable_type'])->toBe('payment_method');
+});
+
+/**
+ * The property `visitAttachedPaymentMethod()`'s docblock claims: a reference belongs to the
+ * instrument, not to whoever holds it, because a card can be attached and re-attached while its
+ * provider-side reference stays what it was. Asserted rather than described, because the code
+ * three lines below that docblock used to defeat it.
+ */
+it('keys a reference on the credential, not on the customer holding it', function () {
+    $paymentMethod = instrumentTestPaymentMethod();
+
+    $this->repo->saveReference(
+        $this->gatewayId,
+        instrumentTestAttached($paymentMethod, '01920000-0000-7000-8000-00000000aaaa'),
+        'pm_ref',
+    );
+
+    $reattached = instrumentTestAttached($paymentMethod, '01920000-0000-7000-8000-00000000bbbb');
+
+    expect($this->repo->find($this->gatewayId, $reattached))->toBe('pm_ref')
+        ->and(Capsule::table('gateway_references')->count())->toBe(1);
+});
+
+it('records a failure in the attached form that is readable in the bare form', function () {
+    $paymentMethod = instrumentTestPaymentMethod();
+
+    $this->repo->saveFailure($this->gatewayId, instrumentTestAttached($paymentMethod), 'card declined');
+
+    $row = instrumentReferenceRow($paymentMethod->id->toString());
+
+    expect($row['failure_reason'])->toBe('card declined')
+        ->and($row['referenceable_type'])->toBe('payment_method')
+        ->and(Capsule::table('gateway_references')->count())->toBe(1);
+});
+
+/**
+ * And the unwrapping stops at the pairing. A `Token` and a `PaymentMethod` sharing a UUID stay
+ * apart — that is what the type half of the key is for — so collapsing the attached form onto the
+ * bare one must not collapse anything else with it.
+ */
+it('still keeps different instrument kinds apart after unwrapping', function () {
+    $shared = Uuid::uuid4()->toString();
+
+    $this->repo->saveReference($this->gatewayId, instrumentTestToken($shared), 'tok_ref');
+    $this->repo->saveReference($this->gatewayId, instrumentTestAttached(instrumentTestPaymentMethod($shared)), 'pm_ref');
+
+    expect($this->repo->find($this->gatewayId, instrumentTestToken($shared)))->toBe('tok_ref')
+        ->and($this->repo->find($this->gatewayId, instrumentTestPaymentMethod($shared)))->toBe('pm_ref')
+        ->and(Capsule::table('gateway_references')->count())->toBe(2);
 });
