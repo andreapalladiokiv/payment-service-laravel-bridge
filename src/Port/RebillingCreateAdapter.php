@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
-use Techork\PaymentService\Common\Contract\CustomerIdentifier;
 use Techork\PaymentService\Common\ValueObject\ThreeDS\ThreeDSResult;
 use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CreateOutcome;
@@ -57,20 +56,18 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 final readonly class RebillingCreateAdapter implements CreatePort
 {
     /**
-     * @param  ?CustomerIdentifier  $customerId  Whose subscription this renews.
-     *
-     * On the adapter for the reason {@see CreateAdapter} gives, and it matters more here than
-     * anywhere else: Nuvei renews through a `userPaymentOptionId`, which exists only under the
+     * No customer parameter, for the reason {@see CreateAdapter} gives: the renewal's own
+     * `CreateRequest` carries the payer. It matters more here than anywhere else that one arrives
+     * at all — Nuvei renews through a `userPaymentOptionId`, which exists only under the
      * `userTokenId` it was stored against, so a renewal that names no customer cannot reach the
-     * stored instrument at all. `authorizeRebilling` had no customer and put none in its options
-     * while routing through the same provider call that reads the key.
+     * stored instrument it exists to charge. `authorizeRebilling` had no customer and put none in
+     * its options while routing through the same provider call that reads the key.
      */
     public function __construct(
         private PlacesRebillingPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
         private ?PaymentIntentId $genesisPaymentIntentId,
-        private ?CustomerIdentifier $customerId = null,
     ) {}
 
     #[Override]
@@ -112,9 +109,8 @@ final readonly class RebillingCreateAdapter implements CreatePort
             initiation: $request->initiation,
             genesisReference: $genesisReference,
             clientUniqueId: $clientUniqueId,
-            billingAddress: $request->billingAddress,
             threeDS: $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
-            customerId: $this->customerId,
+            customer: $request->customer,
         ));
 
         if ($result->reference !== null) {

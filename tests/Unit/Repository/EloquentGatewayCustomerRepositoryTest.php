@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Model;
 use Ramsey\Uuid\Uuid;
-use Techork\PaymentService\Domain\Customer\ValueObject\CustomerId;
 use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 use Techork\PaymentService\Laravel\Repository\EloquentGatewayCustomerRepository;
 
@@ -53,7 +52,7 @@ beforeEach(function () {
 it('answers with the reference it was given', function () {
     $repository = new EloquentGatewayCustomerRepository;
     $gatewayId = GatewayId::generate();
-    $customerId = CustomerId::generate();
+    $customerId = laravelSuiteCustomerId(Uuid::uuid7()->toString());
 
     $repository->saveReference($gatewayId, $customerId, 'cus_stripe_1');
 
@@ -61,7 +60,7 @@ it('answers with the reference it was given', function () {
 });
 
 it('answers nothing for a customer it has never seen', function () {
-    expect(new EloquentGatewayCustomerRepository()->find(GatewayId::generate(), CustomerId::generate()))->toBeNull();
+    expect(new EloquentGatewayCustomerRepository()->find(GatewayId::generate(), laravelSuiteCustomerId(Uuid::uuid7()->toString())))->toBeNull();
 });
 
 /**
@@ -70,7 +69,7 @@ it('answers nothing for a customer it has never seen', function () {
  */
 it('keeps each gateway answer to itself', function () {
     $repository = new EloquentGatewayCustomerRepository;
-    $customerId = CustomerId::generate();
+    $customerId = laravelSuiteCustomerId(Uuid::uuid7()->toString());
     $stripe = GatewayId::generate();
     $nuvei = GatewayId::generate();
 
@@ -88,7 +87,7 @@ it('keeps each gateway answer to itself', function () {
 it('replaces a reference rather than accumulating one', function () {
     $repository = new EloquentGatewayCustomerRepository;
     $gatewayId = GatewayId::generate();
-    $customerId = CustomerId::generate();
+    $customerId = laravelSuiteCustomerId(Uuid::uuid7()->toString());
 
     $repository->saveReference($gatewayId, $customerId, 'cus_old');
     $repository->saveReference($gatewayId, $customerId, 'cus_new');
@@ -105,7 +104,7 @@ it('replaces a reference rather than accumulating one', function () {
  */
 it('treats an empty reference as none', function () {
     $gatewayId = GatewayId::generate();
-    $customerId = CustomerId::generate();
+    $customerId = laravelSuiteCustomerId(Uuid::uuid7()->toString());
 
     Capsule::table('gateway_customers')->insert([
         'id' => Uuid::uuid7()->toString(),

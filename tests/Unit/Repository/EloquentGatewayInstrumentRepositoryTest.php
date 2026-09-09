@@ -4,12 +4,9 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\QueryException;
 use Ramsey\Uuid\Uuid;
-use Techork\PaymentService\Common\ValueObject\BillingAddress;
 use Techork\PaymentService\Common\ValueObject\CardBrand;
 use Techork\PaymentService\Common\ValueObject\Cash;
-use Techork\PaymentService\Common\ValueObject\Country;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Cvc;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Expiration;
@@ -101,14 +98,6 @@ function instrumentTestPaymentMethod(?string $id = null): PaymentMethod
     return new PaymentMethod(
         PaymentMethodId::fromString($id ?? Uuid::uuid4()->toString()),
         instrumentTestCard(),
-        new BillingAddress(
-            firstName: 'Test',
-            lastName: 'User',
-            line: '123 Main St',
-            city: 'NYC',
-            country: new Country('US'),
-            postalCode: '10001',
-        ),
     );
 }
 

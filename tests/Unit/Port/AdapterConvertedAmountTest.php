@@ -39,7 +39,7 @@ it('carries the FX convertedAmount from a charge result into the CreateOutcome',
         amount: new Money(5000, new Currency('EUR')),
         instrument: Mockery::mock(PaymentInstrument::class),
         captureMethod: CaptureMethod::Immediate,
-        billingAddress: new BillingAddress('Test', 'User', '1 St', 'NYC', new Country('US'), '10001'),
+        customer: laravelSuiteCustomer(address: new BillingAddress('1 St', 'NYC', new Country('US'), '10001')),
     ));
 
     expect($outcome->convertedAmount)->toBe($converted)
@@ -61,7 +61,7 @@ it('leaves CreateOutcome convertedAmount null when the charge reports none', fun
         amount: new Money(5000, new Currency('USD')),
         instrument: Mockery::mock(PaymentInstrument::class),
         captureMethod: CaptureMethod::Immediate,
-        billingAddress: new BillingAddress('Test', 'User', '1 St', 'NYC', new Country('US'), '10001'),
+        customer: laravelSuiteCustomer(address: new BillingAddress('1 St', 'NYC', new Country('US'), '10001')),
     ));
 
     expect($outcome->convertedAmount)->toBeNull();

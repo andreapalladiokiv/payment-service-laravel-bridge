@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
-use Techork\PaymentService\Common\Contract\CustomerIdentifier;
+use Techork\PaymentService\Common\ValueObject\Customer;
 use RuntimeException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CaptureOutcome;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CapturePort;
@@ -39,16 +39,21 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 final readonly class CaptureAdapter implements CapturePort
 {
     /**
-     * @param  ?CustomerIdentifier  $customerId  Whose payment this is, for the acquirers that record it on a
-     *   capture as well as on the authorization. Same shape as {@see CreateAdapter}: the host
-     *   names the customer when it builds the adapter, because the domain does not know that
-     *   providers have customers.
+     * @param  ?Customer  $customer  Whose payment this is, for the acquirers that record it on a
+     *   capture as well as on the authorization — ConnexPay accepts `CustomerID` on Capture and
+     *   not on Void or Return.
+     *
+     * Injected here rather than read off the request, unlike {@see CreateAdapter}, and the
+     * difference is the request: a {@see CaptureRequest} carries the amounts and the instrument
+     * and no payer, so there is nothing to read. The intent holds one; a capture that wants it
+     * from there would mean widening a request whose contents are argued field by field, so the
+     * host names it the way it names the gateway.
      */
     public function __construct(
         private CapturesPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
-        private ?CustomerIdentifier $customerId = null,
+        private ?Customer $customer = null,
     ) {}
 
     #[Override]
@@ -68,7 +73,7 @@ final readonly class CaptureAdapter implements CapturePort
             clientUniqueId: "$paymentIntentId:capture",
             authorizedAmount: $request->authorizedAmount,
             instrument: $request->instrument,
-            customerId: $this->customerId,
+            customer: $this->customer,
         ));
 
         if ($result->reference !== null) {

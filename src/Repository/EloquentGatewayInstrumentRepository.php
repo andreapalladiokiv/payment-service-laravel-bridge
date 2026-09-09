@@ -11,6 +11,7 @@ use Techork\PaymentService\Common\Contract\PaymentInstrumentVisitor;
 use Techork\PaymentService\Common\ValueObject\Cash;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
+use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethodId;
 use Techork\PaymentService\Common\ValueObject\Token;
@@ -127,6 +128,19 @@ final readonly class EloquentGatewayInstrumentRepository implements GatewayInstr
     public function visitPaymentMethod(PaymentMethod $paymentMethod): PaymentMethodId
     {
         return $paymentMethod->id;
+    }
+
+    /**
+     * The same id: a reference belongs to the instrument, not to whoever holds it.
+     *
+     * Which customer a card is attached to is a separate map — `GatewayCustomerRepository` —
+     * because one instrument can be attached and re-attached while its provider-side reference
+     * stays what it was.
+     */
+    #[Override]
+    public function visitAttachedPaymentMethod(AttachedPaymentMethod $attached): PaymentMethodId
+    {
+        return $attached->paymentMethod->id;
     }
 
     #[Override]

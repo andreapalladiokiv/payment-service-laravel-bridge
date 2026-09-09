@@ -8,6 +8,7 @@ use Techork\PaymentService\Common\Contract\PaymentInstrument;
 use Techork\PaymentService\Common\ValueObject\BillingAddress;
 use Techork\PaymentService\Common\ValueObject\CardBrand;
 use Techork\PaymentService\Common\ValueObject\Country;
+use Techork\PaymentService\Common\ValueObject\Customer;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Cvc;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Expiration;
@@ -68,16 +69,14 @@ function refundRecorderMoney(int $minor = 1000): Money
     return new Money($minor, new Currency('USD'));
 }
 
-function refundRecorderBillingAddress(): BillingAddress
+function refundRecorderCustomer(): Customer
 {
-    return new BillingAddress(
-        firstName: 'Test',
-        lastName: 'User',
+    return laravelSuiteCustomer(address: new BillingAddress(
         line: '123 Main St',
         city: 'NYC',
         country: new Country('US'),
         postalCode: '10001',
-    );
+    ));
 }
 
 /**
@@ -89,7 +88,7 @@ function refundRecorderChargedEvent(?Money $amount = null): PaymentIntentCharged
         $amount ?? refundRecorderMoney(),
         refundRecorderInstrument(),
         CaptureMethod::Immediate,
-        refundRecorderBillingAddress(),
+        refundRecorderCustomer(),
         [],
         new MerchantDescriptor('ACME STORE'),
         '',
@@ -102,7 +101,7 @@ function refundRecorderAuthorizedEvent(): PaymentIntentAuthorized
         refundRecorderMoney(),
         refundRecorderInstrument(),
         CaptureMethod::Automatic,
-        refundRecorderBillingAddress(),
+        refundRecorderCustomer(),
         [],
         new MerchantDescriptor('ACME STORE'),
         '',

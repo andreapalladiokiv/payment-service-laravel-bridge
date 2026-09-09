@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
-use Symfony\Component\Serializer\Exception\MissingConstructorArgumentsException;
 use Symfony\Component\Serializer\Exception\NotNormalizableValueException;
 use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactory;
 use Symfony\Component\Serializer\Mapping\Loader\AttributeLoader;
@@ -27,12 +26,10 @@ use Techork\PaymentService\Common\ValueObject\CreditCard\Cvc;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Expiration;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Holder;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Number;
-use Techork\PaymentService\Common\ValueObject\Email;
 use Techork\PaymentService\Common\ValueObject\ExpiresAt;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
 use Techork\PaymentService\Common\ValueObject\PaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethodId;
-use Techork\PaymentService\Common\ValueObject\PhoneNumber;
 use Techork\PaymentService\Common\ValueObject\State;
 use Techork\PaymentService\Common\ValueObject\Token;
 use Techork\PaymentService\Common\ValueObject\TokenId;
@@ -44,6 +41,7 @@ use Techork\PaymentService\Laravel\Serializer\PiiAttributeLoader;
 use Techork\PaymentService\Laravel\Serializer\PiiAwareObjectNormalizer;
 use Techork\PaymentService\Laravel\Serializer\UuidNormalizer;
 use Techork\PaymentService\Laravel\Shredding\PiiStore;
+use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 
 /**
  * Records what the PII pipeline wrote so the instrument tests can prove the
@@ -155,16 +153,12 @@ function instrumentNormalizerCard(?State $state = null): CreditCard
 function instrumentNormalizerBillingAddress(?State $state = null): BillingAddress
 {
     return new BillingAddress(
-        firstName: 'John',
-        lastName: 'Public',
         line: '1 Main St',
         city: 'Anchorage',
         country: new Country('US'),
         postalCode: '99501',
         lineExtra: 'Apt 4',
         state: $state,
-        email: new Email('john@example.com'),
-        phone: new PhoneNumber('+19074861000'),
     );
 }
 
@@ -265,7 +259,6 @@ it('round-trips a PaymentMethod wrapping a CreditCard and a full BillingAddress'
     $original = new PaymentMethod(
         id: PaymentMethodId::fromString('0192b1d0-8f2a-7c3e-9a1b-2c3d4e5f6072'),
         instrument: instrumentNormalizerCard(),
-        billingAddress: instrumentNormalizerBillingAddress(),
     );
 
     $rebuilt = $serializer->denormalize($serializer->normalize($original), PaymentInstrument::class);
@@ -346,23 +339,27 @@ it('substitutes the holder stub when the PII key has been shredded', function ()
         ->and($rebuilt->number->last4)->toBe('1111');
 });
 
-it('shreds the nested billing address of a PaymentMethod independently of the card', function () {
-    // The two PII sets live on different classes reached through different code
-    // paths; erasing one must not disturb the other.
+it('shreds the attached customer independently of the card', function () {
+    // The two PII sets live on different classes reached through different code paths; erasing
+    // one must not disturb the other.
+    //
+    // The customer's identity in place of the payment method's own address, which is where the
+    // payer's name used to be. That is the point of the test rather than an adjustment to it: the
+    // name and the cardholder were two `#[Pii]` sets on one instrument, and they are now two sets
+    // on two objects a payment carries — still independently erasable, still reached differently.
     $store = new InstrumentNormalizerTestStore;
     $serializer = instrumentNormalizerSerializer($store);
-    $payload = $serializer->normalize(new PaymentMethod(
-        PaymentMethodId::generate(),
-        instrumentNormalizerCard(),
-        instrumentNormalizerBillingAddress(),
+    $payload = $serializer->normalize(new AttachedPaymentMethod(
+        laravelSuiteCustomer(firstName: 'John', lastName: 'Public'),
+        new PaymentMethod(PaymentMethodId::generate(), instrumentNormalizerCard()),
     ));
 
-    $store->forget($payload['billingAddress']['firstName']);
+    $store->forget($payload['customer']['identity']['firstName']);
     $rebuilt = $serializer->denormalize($payload, PaymentInstrument::class);
 
-    expect($rebuilt->billingAddress->firstName)->toBe(ShreddingStubs::NAME)
-        ->and($rebuilt->billingAddress->lastName)->toBe('Public')
-        ->and((string) $rebuilt->instrument->holder)->toBe('JOHN Q PUBLIC');
+    expect($rebuilt->customer->identity->firstName)->toBe(ShreddingStubs::NAME)
+        ->and($rebuilt->customer->identity->lastName)->toBe('Public')
+        ->and((string) $rebuilt->paymentMethod->instrument->holder)->toBe('JOHN Q PUBLIC');
 });
 
 // ─────────────────────────────────────────────────────────
@@ -489,20 +486,36 @@ it('reads back a state written in the shape the reflection normalizer used to pr
     expect($rebuilt->address?->state)->toEqual(new State('AK', new Country('US')));
 });
 
-it('round-trips a payment method whose billing address carries a state', function () {
+it('round-trips an attached payment method whose billing address carries a state', function () {
     // The same path through the other address VO, kept separate because BillingAddress is the
     // one every non-imported intent carries — so this is the reach of the defect, not a
     // variation on it.
+    //
+    // Through an `AttachedPaymentMethod` because that is where an address reaches an instrument
+    // now: a bare `PaymentMethod` holds none, and the customer inside this one is also what puts
+    // a customer id on the graph, which is one more `UuidValueObject` for the chain to carry.
     $serializer = instrumentNormalizerSerializer();
-    $original = new PaymentMethod(
-        PaymentMethodId::generate(),
-        instrumentNormalizerCard(),
-        instrumentNormalizerBillingAddress(new State('AK', new Country('US'))),
+    $original = new AttachedPaymentMethod(
+        laravelSuiteCustomer(address: new BillingAddress(
+            line: '1 Analytical Way',
+            city: 'Juneau',
+            country: new Country('US'),
+            postalCode: '99801',
+            state: new State('AK', new Country('US')),
+        )),
+        new PaymentMethod(PaymentMethodId::generate(), instrumentNormalizerCard()),
     );
 
     $payload = $serializer->normalize($original);
     $rebuilt = $serializer->denormalize($payload, PaymentInstrument::class);
 
-    expect($payload['billingAddress']['state'])->toBe(['state' => 'AK', 'country' => 'US'])
+    expect($payload['customer']['billingAddress']['state'])->toBe(['state' => 'AK', 'country' => 'US'])
+        // `{uuid: …}`, the property shape every `UuidValueObject` in this chain is stored as —
+        // `UuidNormalizer` reduces the Ramsey object inside and `PropertyNormalizer` rebuilds the
+        // wrapper around it. Pinned because it is a stored contract, and because a customer id
+        // briefly had a normalizer of its own that flattened it to a bare string: that was needed
+        // while the slot was an interface `PropertyNormalizer` could not instantiate, and the
+        // shape here is the evidence the interface is gone.
+        ->and($payload['customer']['id'])->toBe(['uuid' => laravelSuiteCustomerId()->toString()])
         ->and($rebuilt)->toEqual($original);
 });

@@ -14,6 +14,7 @@ use Techork\PaymentService\Common\Contract\PaymentInstrumentVisitor;
 use Techork\PaymentService\Common\ValueObject\Cash;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\HostedPayment;
+use Techork\PaymentService\Common\ValueObject\AttachedPaymentMethod;
 use Techork\PaymentService\Common\ValueObject\PaymentMethod;
 use Techork\PaymentService\Common\ValueObject\Token;
 use function sprintf;
@@ -70,6 +71,7 @@ final class PaymentInstrumentNormalizer implements DenormalizerInterface, Normal
             Cash::type() => Cash::class,
             Token::type() => Token::class,
             PaymentMethod::type() => PaymentMethod::class,
+            AttachedPaymentMethod::type() => AttachedPaymentMethod::class,
             HostedPayment::type() => HostedPayment::class,
             default => throw new InvalidArgumentException(sprintf(
                 'Cannot denormalize PaymentInstrument: missing or unknown "type" key (%s).',
@@ -119,6 +121,12 @@ final class PaymentInstrumentNormalizer implements DenormalizerInterface, Normal
     public function visitPaymentMethod(PaymentMethod $paymentMethod): array
     {
         return $this->serialize($paymentMethod);
+    }
+
+    #[Override]
+    public function visitAttachedPaymentMethod(AttachedPaymentMethod $attached): array
+    {
+        return $this->serialize($attached);
     }
 
     #[Override]

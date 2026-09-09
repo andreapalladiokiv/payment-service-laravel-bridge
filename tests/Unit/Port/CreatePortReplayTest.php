@@ -23,7 +23,7 @@ function replayCreateRequest(PaymentIntentId $id): CreateRequest
         amount: new Money(5000, new Currency('USD')),
         instrument: Mockery::mock(PaymentInstrument::class),
         captureMethod: CaptureMethod::Manual,
-        billingAddress: new BillingAddress('Test', 'User', '1 St', 'NYC', new Country('US'), '10001'),
+        customer: laravelSuiteCustomer(address: new BillingAddress('1 St', 'NYC', new Country('US'), '10001')),
     );
 }
 

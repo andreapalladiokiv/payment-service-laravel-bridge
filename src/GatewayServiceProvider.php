@@ -29,7 +29,6 @@ use Symfony\Component\Serializer\Serializer;
 use Techork\PaymentService\Common\Contract\DecryptInterface;
 use Techork\PaymentService\Common\Contract\EncryptInterface;
 use Techork\PaymentService\Domain\Checkout\CheckoutAggregateRepositoryInterface;
-use Techork\PaymentService\Domain\Customer\CustomerAggregateRepositoryInterface;
 use Techork\PaymentService\Domain\PaymentIntent\PaymentIntentAggregateRepositoryInterface;
 use Techork\PaymentService\Domain\Subscription\SubscriptionAggregateRepositoryInterface;
 use Techork\PaymentService\Firewall\Dsl\FactSchema;
@@ -47,7 +46,6 @@ use Techork\PaymentService\Laravel\Encryption\LaravelEncrypter;
 use Techork\PaymentService\Laravel\EventSourcing\Consumers\LaravelMessageConsumer;
 use Techork\PaymentService\Laravel\EventSourcing\Decorators\GatewayIdMessageDecorator;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\CheckoutAggregateRepository;
-use Techork\PaymentService\Laravel\EventSourcing\Repositories\CustomerAggregateRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateMessageRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\IlluminateSnapshotRepository;
 use Techork\PaymentService\Laravel\EventSourcing\Repositories\PaymentIntentAggregateRepository;
@@ -317,7 +315,6 @@ final class GatewayServiceProvider extends PackageServiceProvider
             CheckoutAggregateRepositoryInterface::class => CheckoutAggregateRepository::class,
             PaymentIntentAggregateRepositoryInterface::class => PaymentIntentAggregateRepository::class,
             SubscriptionAggregateRepositoryInterface::class => SubscriptionAggregateRepository::class,
-            CustomerAggregateRepositoryInterface::class => CustomerAggregateRepository::class,
         ];
 
         foreach ($repositories as $interface => $implementation) {

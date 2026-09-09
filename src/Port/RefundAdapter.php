@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
-use Techork\PaymentService\Common\Contract\CustomerIdentifier;
+use Techork\PaymentService\Common\ValueObject\Customer;
 use RuntimeException;
 use Techork\PaymentService\Domain\PaymentIntent\Port\GatewayDeclinedException;
 use Techork\PaymentService\Domain\PaymentIntent\Refund\Port\RefundPort;
@@ -31,15 +31,18 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 final readonly class RefundAdapter implements RefundPort
 {
     /**
-     * @param  ?CustomerIdentifier  $customerId  Whose money is being returned. On the adapter for
-     *   the reason {@see CreateAdapter} gives, and it is the retry that needs it: "refund to a
-     *   different card" is a payout at Nuvei, and a payout names the user it pays.
+     * @param  ?Customer  $customer  Whose money is being returned, and it is the retry that
+     *   needs it: "refund to a different card" is a payout at Nuvei, and a payout names the user
+     *   it pays.
+     *
+     * Injected here rather than read off the request, for the reason {@see CaptureAdapter} gives —
+     * a `RefundRequest` names an amount and the payment it reverses, not a payer.
      */
     public function __construct(
         private RefundsPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
-        private ?CustomerIdentifier $customerId = null,
+        private ?Customer $customer = null,
     ) {}
 
     #[Override]
@@ -57,7 +60,7 @@ final readonly class RefundAdapter implements RefundPort
             amount: $request->amount,
             clientUniqueId: $refundId,
             retryInstrument: $request->retryInstrument,
-            customerId: $this->customerId,
+            customer: $this->customer,
         );
 
         $result = $this->gateway->refund($command);

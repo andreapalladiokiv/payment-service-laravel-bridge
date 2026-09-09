@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Techork\PaymentService\Laravel\Port;
 
 use Override;
-use Techork\PaymentService\Common\Contract\CustomerIdentifier;
 use Techork\PaymentService\Common\ValueObject\ThreeDS\ThreeDSResult;
 use Techork\PaymentService\Domain\PaymentIntent\CaptureMethod;
 use Techork\PaymentService\Domain\PaymentIntent\Port\CreateOutcome;
@@ -27,20 +26,22 @@ use Techork\PaymentService\Gateway\ValueObject\GatewayId;
 final readonly class CreateAdapter implements CreatePort
 {
     /**
-     * @param  ?CustomerIdentifier  $customerId  Whose payment this is.
+     * No customer here, unlike the gateway id beside it. The payment intent carries its own now —
+     * `CreateRequest` holds a {@see \Techork\PaymentService\Common\ValueObject\Customer}, so
+     * the payer travels with the payment instead of being injected alongside it.
      *
-     * On the adapter for the reason the gateway id is: the host knows both when it decides how to
-     * route this payment, and neither is a fact the payment intent reads. `CreateRequest` and
-     * `CreatePaymentIntentCommand` are deliberately untouched — the command already carries a
-     * `gatewayId()` that `CreateRequest` does not, for exactly this reason, and adding a method to
-     * an interface every host implements to carry a value the aggregate ignores would be the
-     * wrong trade.
+     * This adapter used to take one, on the argument that the host knows who is paying when it
+     * decides how to route the payment and the aggregate ignores the answer. The aggregate does
+     * not ignore it any more: the address it always recorded was carrying the payer's name and
+     * email for want of anywhere else to put them, so naming the customer on the intent replaced
+     * a fact it was already holding rather than adding one. Two sources for the same value is the
+     * thing to avoid — an injected customer and a recorded one disagreeing is invisible until an
+     * acquirer attributes a payment to the wrong person.
      */
     public function __construct(
         private PlacesPayments $gateway,
         private GatewayTransactionRepository $transactionRepository,
         private GatewayId $gatewayId,
-        private ?CustomerIdentifier $customerId = null,
     ) {}
 
     #[Override]
@@ -63,10 +64,9 @@ final readonly class CreateAdapter implements CreatePort
             instrument: $request->instrument,
             amount: $request->amount,
             clientUniqueId: $clientUniqueId,
-            billingAddress: $request->billingAddress,
             threeDS: $request->challengeResult instanceof ThreeDSResult ? $request->challengeResult : null,
             initiation: $request->initiation,
-            customerId: $this->customerId,
+            customer: $request->customer,
         );
 
         // The capture method stays a choice of operation rather than a field on the command,

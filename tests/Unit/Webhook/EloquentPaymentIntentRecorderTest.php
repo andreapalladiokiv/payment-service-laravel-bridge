@@ -15,6 +15,7 @@ use Techork\PaymentService\Common\ValueObject\CreditCard\Expiration;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Holder;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Number;
 use Techork\PaymentService\Common\ValueObject\Country;
+use Techork\PaymentService\Common\ValueObject\Customer;
 use Techork\PaymentService\Common\ValueObject\ExpiresAt;
 use Techork\PaymentService\Common\ValueObject\MerchantDescriptor;
 use Techork\PaymentService\Common\ValueObject\Token;
@@ -73,16 +74,21 @@ function recorderAmount(): Money
     return new Money(1000, new Currency('USD'));
 }
 
-function recorderBillingAddress(): BillingAddress
+/**
+ * The payer these events record, address included.
+ *
+ * `recorderCustomer()` is what this used to be, and the rename is the change: the events
+ * carry a whole {@see \Techork\PaymentService\Common\ValueObject\Customer} where they carried
+ * an address that happened to hold the payer's name.
+ */
+function recorderCustomer(): Customer
 {
-    return new BillingAddress(
-        firstName: 'Test',
-        lastName: 'User',
+    return laravelSuiteCustomer(address: new BillingAddress(
         line: '123 Main St',
         city: 'NYC',
         country: new Country('US'),
         postalCode: '10001',
-    );
+    ));
 }
 
 /**
@@ -95,7 +101,7 @@ function recorderRequiresActionEvent(CaptureMethod $captureMethod = CaptureMetho
         recorderAmount(),
         recorderInstrument(),
         $captureMethod,
-        recorderBillingAddress(),
+        recorderCustomer(),
         [],
         new MerchantDescriptor('ACME STORE'),
         '',
@@ -109,7 +115,7 @@ function recorderAuthorizedEvent(CaptureMethod $captureMethod = CaptureMethod::A
         recorderAmount(),
         recorderInstrument(),
         $captureMethod,
-        recorderBillingAddress(),
+        recorderCustomer(),
         [],
         new MerchantDescriptor('ACME STORE'),
         '',
@@ -290,7 +296,7 @@ it('refuses to confirm through the port kept for refusals', function () {
         recorderAmount(),
         recorderInstrument(),
         CaptureMethod::Automatic,
-        recorderBillingAddress(),
+        recorderCustomer(),
     )))->toThrow(RuntimeException::class, 'without a gateway reference');
 });
 

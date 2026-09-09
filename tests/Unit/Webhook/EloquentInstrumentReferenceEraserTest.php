@@ -5,9 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Model;
 use Ramsey\Uuid\Uuid;
-use Techork\PaymentService\Common\ValueObject\BillingAddress;
 use Techork\PaymentService\Common\ValueObject\CardBrand;
-use Techork\PaymentService\Common\ValueObject\Country;
 use Techork\PaymentService\Common\ValueObject\CreditCard;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Cvc;
 use Techork\PaymentService\Common\ValueObject\CreditCard\Expiration;
@@ -80,14 +78,6 @@ function eraserPaymentMethod(?PaymentMethodId $id = null): PaymentMethod
             Expiration::fromMonthAndYear(12, 2030),
             new Holder('Test User'),
             new Cvc,
-        ),
-        new BillingAddress(
-            firstName: 'Test',
-            lastName: 'User',
-            line: '123 Main St',
-            city: 'NYC',
-            country: new Country('US'),
-            postalCode: '10001',
         ),
     );
 }
